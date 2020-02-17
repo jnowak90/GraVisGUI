@@ -1,4 +1,4 @@
-# GraVis
+# GraVis - a network-based shape descriptor
 Python GUI for GraVis, a network-based shape descriptor.
 Please cite the following paper if you use the tool:
 
