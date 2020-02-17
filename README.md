@@ -22,7 +22,7 @@ GraVis and its graphical user interface (GUI) were written in Python 3 and can b
 Simply download the respository and double click the executable file (depending on your operating system):
   - GraVis.app (OSX)
   - GraVis.exe (Windows)
-  - GraVis. (Linux)
+  - GraVis (Linux)
 
 Example data is available in the demo folder. For further information read the README.
 
