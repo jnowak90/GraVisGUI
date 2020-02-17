@@ -37,20 +37,20 @@ In the next step, the type of image to be analyzed has to be selected. If paveme
 The image pre-processing pipeline automatically detects noise or artificial edges in the image and remove them. If the pre-processing is not satisfying for the user, some of these steps can be enforced by ticking the corresponding boxes. If the plotting of intermediate steps is selected, the binary and skeletonized images of  PC outlines are saved in the output folder. After completing the pre-processing, the image with the segmented and labeled PCs will be displayed on the right side.
 For the graph extraction the resolution of the image has to be provided. Furthermor, the graph extraction is only working if the selected image(s) were pre-processed beforehand.
 
-![Shape description PCs](/images/GraVisGUI_description_PCs.png)
+![Shape description PCs](/doc/images/GraVisGUI_description_PCs.png)
 
 If other shapes were selected for the analysis, the user has to provide binary images and has to provide the distance between nodes along the shapes (in pixel/node). The analysis pipeline is started by pressing "Run". The progress of the analysis will be printed in the log on the right side.
 
-![Shape description other](/images/GraVisGUI_description_other.png)
+![Shape description other](/doc/images/GraVisGUI_description_other.png)
 
 ## Shape Comparison
 To measure the similarity of different shapes, we implemented an algorithm to calculate the distance between visibility graphs. The user has to provide a single or multiple sets of visibility graphs by clicking "Add graphs" (.gpickle files).
 
-![Shape comparison single](/images/GraVisGUI_comparison_single.png)
+![Shape comparison single](/doc/images/GraVisGUI_comparison_single.png)
 
 If more than one graph set is selected, the user has to add labels for each set. All graphs can be removed with "Remove graphs".
 
-![Shape comparison multiple](/images/GraVisGUI_comparison_multiple.png)
+![Shape comparison multiple](/doc/images/GraVisGUI_comparison_multiple.png)
 
 Starting the comparison will generate a distance matrix of the input graphs. Here, the user can select if plots of the PCA or clustering dendrogram should be displayed on the right side.
 
@@ -115,7 +115,7 @@ plt.show()
 ```
 This will result in the following plot:
 
-![PC Heatmap](/images/GraVisGUI_heatmapPCs.png)
+![PC Heatmap](/doc/images/GraVisGUI_heatmapPCs.png)
 
 ## Demo
 The demo folder inludes example images for pavement cells and other organisms, as well as extracted visibility graphs which can be used to test the GUI.
