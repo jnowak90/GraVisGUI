@@ -37,7 +37,7 @@ In the next step, the type of image to be analyzed has to be selected. If paveme
 The image pre-processing pipeline automatically detects noise or artificial edges in the image and remove them. If the pre-processing is not satisfying for the user, some of these steps can be enforced by ticking the corresponding boxes. If the plotting of intermediate steps is selected, the binary and skeletonized images of  PC outlines are saved in the output folder. After completing the pre-processing, the image with the segmented and labeled PCs will be displayed on the right side.
 For the graph extraction the resolution of the image has to be provided. Furthermor, the graph extraction is only working if the selected image(s) were pre-processed beforehand.
 
-![Shape description PCs](/doc/images/GraVisGUI_description_PCs.png | width=100)
+![Shape description PCs](/doc/images/GraVisGUI_description_PCs.png){:width="400px"}
 
 If other shapes were selected for the analysis, the user has to provide binary images and has to provide the distance between nodes along the shapes (in pixel/node). The analysis pipeline is started by pressing "Run". The progress of the analysis will be printed in the log on the right side.
 
