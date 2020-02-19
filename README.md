@@ -16,15 +16,17 @@ Please cite the following paper if you use the tool:
   - [Troubleshooting](#troubleshooting)
 
 ## Requirements
-GraVis and its graphical user interface (GUI) were written in Python 3 and can be downloaded as an executable file for all major operating systems. To run the GUI, no installation of Python is needed.
+GraVis and its graphical user interface (GUI) were written in Python 3 and can be downloaded as an executable file for all major operating systems (Linux, Windows, Mac OS). To run the GUI, no installation of Python is needed.
 
 ## Installation
-Simply download the respository and double click the executable file (depending on your operating system):
-  - GraVis.app (OSX)
-  - GraVis.exe (Windows)
-  - GraVis (Linux)
+Simply download the executable file depending on your operating system from the release page and double click the downloaded file. It might take some seconds before the GUI opens. Example data is available in the demo folder. For further information read the README.
 
-Example data is available in the demo folder. For further information read the README.
+The executables were created usign pyInstaller using the following operating systems:
+   - **Windows**: Windows 10
+   - **OSX**: MacOS 10.13.6 High Sierra 
+   - **Linux**: Ubuntu Studio 16.04.1
+   
+Using older versions of the above mentioned operating systems could raise errors.
 
 ## Shape Description
 GraVis uses the concept of visibility graphs to describe global and local features of shapes. While GraVis was mainly developed to describe the shape of pavement cells (PCs) of leaves, it can also be used for shape description of other shapes.
