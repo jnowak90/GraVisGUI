@@ -13,7 +13,6 @@ Please cite the following paper if you use the tool:
   - [Shape Comparison](#shape-comparison)
   - [Complexity Heatmap](#complexity-heatmap)
   - [Demo](#demo)
-  - [Troubleshooting](#troubleshooting)
 
 ## Requirements
 GraVis and its graphical user interface (GUI) were written in Python 3 and can be downloaded as an executable file for all major operating systems (Linux, Windows, Mac OS). To run the GUI, no installation of Python is needed.
@@ -140,5 +139,3 @@ The demo folder inludes example images for pavement cells and other organisms, a
   - add labels for the graphs if both sets were added
   - select if you want to plot the PCA or clusetering dendrogram
   - press "Run"
-
-## Troubleshooting
