@@ -4,7 +4,7 @@ Please cite the following paper if you use the tool:
 
    Nowak, J., Eng, R.C., Matz, T., Waack, M., Persson, S., Sampathkumar, A. and Nikoloski, Z.
    A network-based framework for shape analysis enables accurate characterization and classification of leaf epidermal cells.
-   Submitted to *Science Advances*.
+   Submitted to *Nature Communications*.
 
 ## Contents
   - [Requirements](#requirements)
@@ -25,7 +25,7 @@ The executables were created usign pyInstaller using the following operating sys
    - **OSX**: MacOS 10.13.6 High Sierra 
    - **Linux**: Ubuntu Studio 16.04.1
    
-Using older versions of the above mentioned operating systems could raise errors.
+Using older versions of the above mentioned operating systems could raise errors. If you use Linux you might have to change the permission of the executable to make it work. Right click the executable and go to *Properties* -> *Permission* and tick *Allow executing file as program*.
 
 ## Shape Description
 GraVis uses the concept of visibility graphs to describe global and local features of shapes. While GraVis was mainly developed to describe the shape of pavement cells (PCs) of leaves, it can also be used for shape description of other shapes.
@@ -36,11 +36,11 @@ In the next step, the type of image to be analyzed has to be selected. If paveme
   - both image pre-processing and graph extraction
 
 The image pre-processing pipeline automatically detects noise or artificial edges in the image and remove them. If the pre-processing is not satisfying for the user, some of these steps can be enforced by ticking the corresponding boxes. If the plotting of intermediate steps is selected, the binary and skeletonized images of  PC outlines are saved in the output folder. After completing the pre-processing, the image with the segmented and labeled PCs will be displayed on the right side.
-For the graph extraction the resolution of the image has to be provided. Furthermor, the graph extraction is only working if the selected image(s) were pre-processed beforehand.
+For the graph extraction the resolution of the image has to be provided. Furthermore, the graph extraction is only working if the selected image(s) were pre-processed beforehand.
 
 <img src="/doc/images/GraVisGUI_description_PCs.png" width="600">
 
-If other shapes were selected for the analysis, the user has to provide binary images and has to provide the distance between nodes along the shapes (in pixel/node). The analysis pipeline is started by pressing "Run". The progress of the analysis will be printed in the log on the right side.
+If other shapes were selected for the analysis, the user has to provide binary images and has to provide the distance between nodes along the shapes (in pixel/node). The analysis pipeline is started by pressing "Run". The progress of the analysis will be printed in the log on the right side. Depending on the number of detected shapes and the number of input images, the analysis can take from seconds to several minutes to complete. 
 
 <img src="/doc/images/GraVisGUI_description_other.png" width="600">
 
@@ -55,7 +55,7 @@ If more than one graph set is selected, the user has to add labels for each set.
 
 Starting the comparison will generate a distance matrix of the input graphs. Here, the user can select if plots of the PCA or clustering dendrogram should be displayed on the right side.
 
-Due to computational limits, the total number of input graphs should not exceed 200.
+Due to computational limits, the total number of input graphs should not exceed 200 graphs. The computation of the distance matrix usually takes a few seconds up to a few minutes. 
 
 ## Complexity Heatmap
 The complexity of visibility graphs can be displayed in a heatmap with the following code:
