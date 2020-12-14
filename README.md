@@ -1,10 +1,15 @@
 # GraVis - a network-based shape descriptor
+
+
+[![DOI](https://zenodo.org/badge/241072565.svg)](https://zenodo.org/badge/latestdoi/241072565)
+
+
 Python GUI for GraVis, a network-based shape descriptor.
 Please cite the following paper if you use the tool:
 
    Nowak, J., Eng, R.C., Matz, T., Waack, M., Persson, S., Sampathkumar, A. and Nikoloski, Z.
    A network-based framework for shape analysis enables accurate characterization and classification of leaf epidermal cells.
-   Submitted to *Nature Communications*.
+    *Nature Communications* (accepted).
 
 ## Contents
   - [Requirements](#requirements)
