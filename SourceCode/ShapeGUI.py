@@ -23,6 +23,7 @@ import math
 import shapely
 from shapely import geometry
 import pickle
+import time
 import sklearn
 from sklearn import decomposition
 import matplotlib
@@ -740,6 +741,10 @@ class VisGraph:
                 messagebox.showinfo("Warning", "No pre-processed files were found for the selected image.")
         self.shapeResultsTable = pd.DataFrame(columns=['CellNumber', 'Lobes', 'Necks', 'Junctions', 'JunctionLobes', 'Complexity', 'Circularity', 'Area', 'Perimeter'])
         self.lobeParameters = pd.DataFrame(columns=['CellLabel', 'NodeLabelLobe', 'NodeLabelNeck1', 'NodeLabelNeck2', 'LobeLength', 'NeckWidth'])
+        if os.path.isfile(self.outputFolder + '/visibilityGraphs.gpickle'):
+            os.remove(self.outputFolder + '/visibilityGraphs.gpickle')
+            os.remove(self.outputFolder + '/cellContours.gpickle')
+            os.remove(self.outputFolder + '/shapeResultsTable.csv')
 
         self.junctions = self.detect_threeway_junctions(self.skeletonImage, self.branchlessSkeleton, self.labeledImage)
         self.visibilityGraphs, self.cellContours = self.visibility_graphs(self.labeledImage, self.labels, self.resolution)
@@ -749,11 +754,8 @@ class VisGraph:
                 os.makedirs(self.outputFolder + '/resultsGraVis')
             except OSError:
                 messagebox.showinfo("Warning", "Creation of the results directory failed.")
-        self.add_data_to_table(self.visibilityGraphs, self.cellContours, self.labeledImage, self.labels, self.junctions, self.resolution)
 
-        self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv')
-        self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv')
-        nx.write_gpickle(self.visibilityGraphs, self.outputFolder + '/visibilityGraphs.gpickle')
+        self.add_data_to_table(self.visibilityGraphs, self.cellContours, self.labeledImage, self.labels, self.junctions, self.resolution)
         show_Message("\nGraVis is done!")
 
     def detect_threeway_junctions(self, skeletonImage, branchlessSkeleton, labeledImage):
@@ -809,6 +811,12 @@ class VisGraph:
             visGraph, cellContour = self.create_visibility_graph(labeledImage, label, resolution)
             visGraphsAll[label-1] = visGraph
             cellContoursAll[label-1] = cellContour
+            visGraphsPickle = open(self.outputFolder + '/visibilityGraphs.gpickle', 'ab')
+            pickle.dump(visGraph, visGraphsPickle)
+            visGraphsPickle.close()
+            cellContoursPickle = open(self.outputFolder + '/cellContours.gpickle', 'ab')
+            pickle.dump(cellContour, cellContoursPickle)
+            cellContoursPickle.close()
         return(visGraphsAll, cellContoursAll)
 
     def create_visibility_graph(self, labeledImage, label, resolution):
@@ -882,7 +890,11 @@ class VisGraph:
                 dataAppend = [label, len(lobes), len(necks), len(cellJunctions), len(correlatedJunctions), sigma, circ, area, np.sum(cellContour)]
             else:
                 dataAppend = [label, 0,0,0,0,0,0]
-            self.shapeResultsTable.loc[label] = dataAppend
+            self.shapeResultsTable.loc[0] = dataAppend
+            if not os.path.isfile(self.outputFolder + '/ShapeResultsTable.csv'):
+                shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False)
+            else:
+                shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False)
 
     def find_number_of_cell_junctions(self, cellContour):
         """
@@ -946,7 +958,11 @@ class VisGraph:
                 lobelength = self.calculate_lobe_length(neck1, neck2, lobe1, pos)
             neckwidth = euclidean(pos[neck1], pos[neck2])
             dataLobes = [key, lobe1, neck1, neck2, lobelength * resolution, neckwidth * resolution]
-            self.lobeParameters.loc[len(self.lobeParameters)] = dataLobes
+            self.lobeParameters.loc[0] = dataLobes
+            if not os.path.isfile(self.outputFolder + '/LobeParameters.csv'):
+                shapeResultsTable.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False)
+            else:
+                shapeResultsTable.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False, header=False)
         self.create_visual_output(key, visGraph, cellContour, cellJunctions, lobes, necks, correlatedJunctions, pos)
 
     def find_lobe_between_necks(self, lobes, nodes):
@@ -1037,6 +1053,10 @@ class VisGraphOther:
         self.inputType = inputType
         self.fileList = fileList
         self.shapeResultsTable = pd.DataFrame(columns=['File', 'LabeledImage', 'GraphNumber', '#Nodes', '#Edges', 'Complexity'])
+        if os.path.isfile(self.outputFolder + '/visibilityGraphs.gpickle'):
+            os.remove(self.outputFolder + '/visibilityGraphs.gpickle')
+            os.remove(self.outputFolder + '/cellContours.gpickle')
+            os.remove(self.outputFolder + '/shapeResultsTable.csv')
 
         if self.inputType == 'image':
             show_Message("...Load binary image.")
@@ -1044,7 +1064,7 @@ class VisGraphOther:
             show_Message("...Create visibility graphs:")
             self.visibilityGraphsOther = self.visibility_graphs_other(self.labeledImage, self.labels, self.resolution)
             for graph in self.visibilityGraphsOther.keys():
-                self.shapeResultsTable = self.add_data_to_table(self.visibilityGraphsOther[graph], self.selectedImage, graph, 'LabeledShapes.png')
+                self.add_data_to_table(self.visibilityGraphsOther[graph], self.selectedImage, graph, 'LabeledShapes.png')
             self.plot_labeled_image(self.labeledImage, self.outputFolder, self.labels, 'image', 1)
         else:
             graphIndex = 1
@@ -1057,16 +1077,13 @@ class VisGraphOther:
                 labeledFile = self.plot_labeled_image(self.labeledImage, self.outputFolder, self.labels, 'folder', graphIndex)
                 if len(self.visibilityGraph) == 1:
                     self.visibilityGraphsOther[graphIndex] = list(self.visibilityGraph.values())[0]
-                    self.shapeResultsTable = self.add_data_to_table(list(self.visibilityGraph.values())[0], file, graphIndex, labeledFile)
+                    self.add_data_to_table(list(self.visibilityGraph.values())[0], file, graphIndex, labeledFile)
                     graphIndex += 1
                 else:
                     for graph in self.visibilityGraph.keys():
                         self.visibilityGraphsOther[graphIndex] = self.visibilityGraph[graph]
-                        self.shapeResultsTable = self.add_data_to_table(self.visibilityGraph[graph], file, graphIndex, labeledFile)
+                        self.add_data_to_table(self.visibilityGraph[graph], file, graphIndex, labeledFile)
                         graphIndex += 1
-
-        self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv')
-        nx.write_gpickle(self.visibilityGraphsOther, self.outputFolder + '/visibilityGraphs.gpickle')
         show_Message("\nGraVis is done!")
 
     def label_binary_image(self, selectedImage):
@@ -1077,6 +1094,9 @@ class VisGraphOther:
         if len(rawImage.shape) == 2:
             if len(np.unique(rawImage)) == 2:
                 binaryImage = rawImage > 0
+                if (1 in binaryImage[0, :]) or (1 in binaryImage[-1, :]) or (1 in binaryImage[:, 0]) or (1 in binaryImage[:, -1]):
+                    show_Message("...Detected objects at image border. Added padding to binary image.")
+                    binaryImage = np.pad(binaryImage, pad_width=3, mode='constant', constant_values=0)
                 labeledImage, labels = sp.ndimage.label(binaryImage, np.ones((3,3)))
                 return(labeledImage, labels)
             else:
@@ -1089,11 +1109,18 @@ class VisGraphOther:
         create a visibility graph for all cells
         """
         visGraphsAll = {}
+        cellContoursAll = {}
         for label in range(1, labels+1):
             show_Message("......Graph " + str(label) + " of " + str(labels))
             visGraph, cellContour = self.create_visibility_graph(labeledImage, label, resolution)
             if visGraph != None:
                 visGraphsAll[label] = visGraph
+                visGraphsOtherPickle = open(self.outputFolder + '/visibilityGraphs.gpickle', 'ab')
+                pickle.dump(visGraph, visGraphsOtherPickle)
+                visGraphsOtherPickle.close()
+                cellContoursOtherPickle = open(self.outputFolder + '/vcellContours.gpickle', 'ab')
+                pickle.dump(cellContour, cellContoursOtherPickle)
+                cellContoursOtherPickle.close()
         return(visGraphsAll)
 
     def create_visibility_graph(self, labeledImage, label, resolution):
@@ -1159,8 +1186,11 @@ class VisGraphOther:
         fileName = file.split('/')[-1]
         sigma = self.compute_graph_complexity(visGraph)
         dataAppend = [fileName, labeledFile, index, visGraph.number_of_nodes(), visGraph.number_of_edges(), sigma]
-        self.shapeResultsTable.loc[len(self.shapeResultsTable)] = dataAppend
-        return(self.shapeResultsTable)
+        self.shapeResultsTable.loc[0] = dataAppend
+        if not os.path.isfile(self.outputFolder + '/ShapeResultsTable.csv'):
+            shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False)
+        else:
+            shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False)
 
     def compute_graph_complexity(self, visGraph):
         """
@@ -1212,7 +1242,20 @@ class Comparison:
 
         self.visibilityGraphsAll = []
         if len(self.pathToVisibilityGraphs) == 1:
-            self.visibilityGraphs = pickle.load(open(self.pathToVisibilityGraphs[0], 'rb'))
+            self.visibilityGraphs = {}
+            graphCounter = 1
+            with open(self.pathToVisibilityGraphs[0], 'rb') as pickleFile:
+                try:
+                    while True:
+                        obj = pickle.load(pickleFile)
+                        try:
+                            items = obj.items()
+                            self.visibilityGraphs = obj
+                        except (AttributeError, TypeError):
+                            self.visibilityGraphs[graphCounter] = obj
+                            graphCounter += 1
+                except EOFError:
+                    pass
             self.inputLabels = np.arange(1, len(self.visibilityGraphs) + 1, 1)
             for indexKey, key in enumerate(self.visibilityGraphs.keys()):
                 self.visibilityGraphsAll.append(self.visibilityGraphs[key])
@@ -1220,7 +1263,20 @@ class Comparison:
                 self.resultsTable.loc[len(self.resultsTable)] = dataAppend
         else:
             for index, graphSet in enumerate(self.pathToVisibilityGraphs):
-                self.visibilityGraphs = pickle.load(open(graphSet, 'rb'))
+                self.visibilityGraphs = {}
+                graphCounter = 1
+                with open(graphSet, 'rb') as pickleFile:
+                    try:
+                        while True:
+                            obj = pickle.load(pickleFile)
+                            try:
+                                items = obj.items()
+                                self.visibilityGraphs = obj
+                            except (AttributeError, TypeError):
+                                self.visibilityGraphs[graphCounter] = obj
+                                graphCounter += 1
+                    except EOFError:
+                        pass
                 for indexKey, key in enumerate(self.visibilityGraphs.keys()):
                     self.visibilityGraphsAll.append(self.visibilityGraphs[key])
                     dataAppend = [graphSet.split('/')[-1], indexKey+1, self.inputLabels[index], self.colorList[index]]
@@ -1465,7 +1521,7 @@ def correct_gaps_in_skeleton(skeletonImage):
 
         for xPos, yPos in correctingEndpoints:
             angles, rows, columns = evaluate_angle(xPos, yPos, endpoints, imageEndpointsCrossings)
-            if len(angles) != 0 and (np.max(angles) - np.min(angles) < 45):
+            if len(angles) != 0 and (np.max(angles) - np.min(angles) < 20):
                 correctedSkeletonImage[rows, columns] = 2
                 #print("Correction added: ", str(xPos), str(yPos))
     return(correctedSkeletonImage)
@@ -1481,7 +1537,10 @@ def evaluate_angle(x, y, endpoints, image):
     if np.sum(image[rows[1:-1], columns[1:-1]]) == 0:
         angleEndpoint1 = measure_angle_of_endpoints(xPos1, yPos1, image)
         angleEndpoint2 = measure_angle_of_endpoints(xPos2, yPos2, image)
-        angleBetweenEndpoints = angle180([yPos1 - yPos2, xPos1 - xPos2])
+        if xPos2 < xPos1:
+            angleBetweenEndpoints = angle180([yPos2 - yPos1, xPos2 - xPos1])
+        else:
+            angleBetweenEndpoints angle180([yPos1 - yPos2, xPos1 - xPos2])
         allAngles = [angleEndpoint1, angleEndpoint2, angleBetweenEndpoints]
     return(allAngles, rows, columns)
 
@@ -1519,15 +1578,22 @@ def detect_crossings_and_endpoints(skeletonImage, mode='both', output='image'):
     for x, y in coord:
         window, winBounds = create_window(skeletonImage, x, y, 1, 2, 1, 2)
         window[x - winBounds[0], y - winBounds[2]] = 0
-        window_label, L = sp.ndimage.label(window)
+        labeledWindow, L = sp.ndimage.label(window)
         if mode == 'both' or mode == 'endpoints':
             if L == 1 or L == 0:
                 detected_nodes[x, y] = 3
                 node_list.append([x, y])
         if mode == 'both' or mode == 'crossings':
-            if L == 3:
+            if L == 3 or L == 4:
                 detected_nodes[x, y] = 2
                 node_list.append([x, y])
+            if L == 2:
+                windowDetected, _ = create_window(dtected_nodes, x, y, 1, 2, 1, 2)
+                windowDetected[x - winBounds[0], y - winBounds[2]] = 0
+                labeledWindowConnectivity, Lconnectivity = sp.ndimage.label(windowDetected, np.ones((3, 3)))
+                if 2 not in windowDetected and Lconnectivity == 1:
+                    detected_nodes[x, y] = 2
+                    node_list.append([x, y])
     if output == 'image':
         return(detected_nodes)
     else:
@@ -1539,7 +1605,9 @@ def angle180(dxy):
     """
     dx, dy = dxy
     rad2deg = 180.0 / np.pi
-    angle = np.mod(np.arctan2(-dx, -dy) * rad2deg + 180.0, 180.0)
+    angle = np.mod(np.arctan2(-dx, -dy) * rad2deg + 360.0, 360.0)
+    if angle >= 270:
+        angle = 360 - angle
     return(angle)
 
 def measure_angle_of_endpoints(x, y, image):
@@ -1547,21 +1615,35 @@ def measure_angle_of_endpoints(x, y, image):
     measure the angle between two endpoint of the skeleton
     """
     window, winBounds = create_window(image, x, y, 5, 6, 5, 6)
-    if 2 in window:
-        coord = np.transpose(np.where(window == 2))
+    cleanedWindow = (window > 0) * 1
+    labeledWindow, labelsWindow = sp.ndimage.label(cleanedWindow, np.ones((3, 3)))
+    labelSkeleton = labeledWindow[x - winBounds[0], y - winBounds[2]]
+    coordLabel = np.transpose(np.where(labeledWindow == labelSkeleton))
+    newWindow = window.copy() * 0
+    for s, t in coordLabel:
+        newWindow[s, t] = window[s, t]
+
+    if 2 in newWindow:
+        coord = np.transpose(np.where(newWindow == 2))
         dista = []
         for s, t in coord:
             dista.append(euclidean([s, t], [x - winBounds[0], y - winBounds[2]]))
-        w = np.where(np.min(dista))[0][0]
-        angle = angle180([y - (coord[w][1] + winBounds[2]), x - (coord[w][0] + winBounds[0])])
+        w = np.argmin(dista)
+        if x < coord[w][0] + winBounds[0]:
+            angle = angle180([y - (coord[w][1] + winBounds[2]), x - (coord[w][0] + winBounds[0])])
+        else:
+            angle = angle180([(coord[w][1] + winBounds[2]) - y, (coord[w][0] + winBounds[0]) - x])
     else:
         coord = np.transpose(np.where(window == 1))
         dista = []
         for s, t in coord:
             dista.append(euclidean([s, t], [x - winBounds[0], y - winBounds[2]]))
         if len(dista) != 0:
-            w = np.where(np.max(dista))[0][0]
-            angle = angle180([y - (coord[w][1] + winBounds[2]), x - (coord[w][0] + winBounds[0])])
+            w = np.argmax(dista)
+            if x < coord[w][0] + winBounds[0]:
+                angle = angle180([y - (coord[w][1] + winBounds[2]), x - (coord[w][0] + winBounds[0])])
+            else:
+                angle = angle180([(coord[w][1] + winBounds[2]) - y, (coord[w][0] + winBounds[0]) - x])
         else:
             angle = 0
     return(angle)
@@ -1638,7 +1720,13 @@ def marching_squares(contour, cellImage):
     xRight,yRight = find_rightmost_point(contour)
     contourImage = cellImage.copy() * 2
     contourImage[contour[:, 0], contour[:, 1]] = 1
+    timeout = 120
+    startTime = time.time()
     while len(contourCopy) > 0:
+        timeDelta = time.time() - startTime
+        if timeDelta >= timeout:
+            show_Message('......Encountered timeout error while sorting the contour coordinates.')
+            break
         window = contourImage[xRight:xRight+2, yRight:yRight+2]
         nextWindow, nextContourPixel = orientation(window)
         if len(nextContourPixel) > 0:
@@ -1661,8 +1749,11 @@ def marching_squares(contour, cellImage):
             xRight = xRight- 1
         elif nextWindow == 'down':
             xRight = xRight + 1
-    clockwise = np.append([orderedContour[0]], orderedContour[-1:0:-1], axis=0)
-    clockwise = clockwise.astype('int')
+    if len(orderedContour) != len(contour):
+        clockwise = []
+    else:
+        clockwise = np.append([orderedContour[0]], orderedContour[-1:0:-1], axis=0)
+        clockwise = clockwise.astype('int')
     return(clockwise)
 
 def find_rightmost_point(contour):
