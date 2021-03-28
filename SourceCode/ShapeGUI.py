@@ -314,6 +314,7 @@ class ShapeGui:
         """
         workflow for the shape description framework
         """
+        self.generatedOutput = False
         if self.fileName != "":
             if self.fileType == "image":
                 self.analyze_image(self.fileName)
@@ -323,8 +324,9 @@ class ShapeGui:
                     self.display_original_image(self.fileName)
                     self.canvasOriginal.update()
                     self.analyze_image(self.fileName)
-            messagebox.showinfo("GraVis", "Analysis is done. \n\nResults were saved into: \n\n" + self.outputFolder)
-            self.filename = ""
+            if self.generatedOutput == True:
+                messagebox.showinfo("GraVis", "Analysis is done. \n\nResults were saved into: \n\n" + self.outputFolder)
+                self.filename = ""
         else:
             messagebox.showinfo("Warning", "No image was selected. Please open an image first before starting the analysis.")
 
@@ -368,8 +370,12 @@ class ShapeGui:
         start graph extraction pipeline
         """
         if self.varResolution.get() != "":
-            show_Message("\nStart graph extraction for detected cells.")
-            self.visibilityGraphs = VisGraph(self.preprocessedImage, self.varPlot.get(), self.varResolution.get(), self.outputFolder)
+            if ',' in self.varResolution.get():
+                messagebox.showinfo("Warning", "Please use a dot for floats (i.e. 0.23 µm/px).")
+            else:
+                show_Message("\nStart graph extraction for detected cells.")
+                self.visibilityGraphs = VisGraph(self.preprocessedImage, self.varPlot.get(), self.varResolution.get(), self.outputFolder)
+                self.generatedOutput = True
         else:
             messagebox.showinfo("Warning", "No resolution was provided. Please enter the image resolution and run the analysis again.")
 
@@ -380,13 +386,17 @@ class ShapeGui:
         if self.fileName != "":
             show_Message("\nStart graph extraction.")
             self.outputFolder = "/".join(self.fileName.split('/')[:-1])
-            self.visibilityGraphs = VisGraphOther(self.fileName, self.varResolution.get(), self.outputFolder, self.fileType, self.fileList)
-            messagebox.showinfo("GraVis", "Analysis is done. \n\nResults were saved into: \n\n" + self.outputFolder)
-            if self.fileType == 'image':
-                self.display_segmented_image('/LabeledShapes.png', self.outputFolder, "")
-            else:
-                self.display_segmented_image('/LabeledShapes_1.png', self.outputFolder, "")
-            self.filename = ""
+            if self.varResolution.get() != "":
+                if ',' in self.varResolution.get():
+                    messagebox.showinfo("Warning", "Please use a dot for floats (i.e. 0.23 µm/px).")
+                else:
+                    self.visibilityGraphs = VisGraphOther(self.fileName, self.varResolution.get(), self.outputFolder, self.fileType, self.fileList)
+                    messagebox.showinfo("GraVis", "Analysis is done. \n\nResults were saved into: \n\n" + self.outputFolder)
+                    if self.fileType == 'image':
+                        self.display_segmented_image('/LabeledShapes.png', self.outputFolder, "")
+                    else:
+                        self.display_segmented_image('/LabeledShapes_1.png', self.outputFolder, "")
+                    self.filename = ""
         else:
             messagebox.showinfo("Warning", "No image was selected. Please open an image first before starting the analysis.")
 
@@ -743,8 +753,12 @@ class VisGraph:
         self.lobeParameters = pd.DataFrame(columns=['CellLabel', 'NodeLabelLobe', 'NodeLabelNeck1', 'NodeLabelNeck2', 'LobeLength', 'NeckWidth'])
         if os.path.isfile(self.outputFolder + '/visibilityGraphs.gpickle'):
             os.remove(self.outputFolder + '/visibilityGraphs.gpickle')
+        if os.path.isfile(self.outputFolder + '/cellContours.gpickle'):
             os.remove(self.outputFolder + '/cellContours.gpickle')
+        if os.path.isfile(self.outputFolder + '/shapeResultsTable.csv'):
             os.remove(self.outputFolder + '/shapeResultsTable.csv')
+        if os.path.isfile(self.outputFolder + '/LobeParameters.csv'):
+            os.remove(self.outputFolder + '/LobeParameters.csv')
 
         self.junctions = self.detect_threeway_junctions(self.skeletonImage, self.branchlessSkeleton, self.labeledImage)
         self.visibilityGraphs, self.cellContours = self.visibility_graphs(self.labeledImage, self.labels, self.resolution)
@@ -757,6 +771,8 @@ class VisGraph:
 
         self.add_data_to_table(self.visibilityGraphs, self.cellContours, self.labeledImage, self.labels, self.junctions, self.resolution)
         show_Message("\nGraVis is done!")
+        #CalculateUndulationDepthAndWidthForTissue()
+
 
     def detect_threeway_junctions(self, skeletonImage, branchlessSkeleton, labeledImage):
         """
@@ -809,14 +825,15 @@ class VisGraph:
         for label in range(2, labels+1):
             show_Message("......Graph " + str(label-1) + ' of ' + str(labels-1))
             visGraph, cellContour = self.create_visibility_graph(labeledImage, label, resolution)
-            visGraphsAll[label-1] = visGraph
-            cellContoursAll[label-1] = cellContour
-            visGraphsPickle = open(self.outputFolder + '/visibilityGraphs.gpickle', 'ab')
-            pickle.dump(visGraph, visGraphsPickle)
-            visGraphsPickle.close()
-            cellContoursPickle = open(self.outputFolder + '/cellContours.gpickle', 'ab')
-            pickle.dump(cellContour, cellContoursPickle)
-            cellContoursPickle.close()
+            if len(cellContour) != 0:
+                visGraphsAll[label-1] = visGraph
+                cellContoursAll[label-1] = cellContour
+                visGraphsPickle = open(self.outputFolder + '/visibilityGraphs.gpickle', 'ab')
+                pickle.dump(visGraph, visGraphsPickle)
+                visGraphsPickle.close()
+                cellContoursPickle = open(self.outputFolder + '/cellContours.gpickle', 'ab')
+                pickle.dump(cellContour, cellContoursPickle)
+                cellContoursPickle.close()
         return(visGraphsAll, cellContoursAll)
 
     def create_visibility_graph(self, labeledImage, label, resolution):
@@ -829,9 +846,12 @@ class VisGraph:
         contourImage, cellContourOrdered = self.extract_cell_contour(label, labeledImage)
         if len(cellContourOrdered) != 0:
             pixelsOnContour = interpolate_contour_pixels(cellContourOrdered, pixelDistance)
-            for key in pixelsOnContour:
-                visGraph.add_node(key, pos=(pixelsOnContour[key][0], pixelsOnContour[key][1]))
-            visGraph = self.add_edges_to_visGraph(pixelsOnContour, visGraph, cases)
+            if len(pixelsOnContour) >= 4:
+                for key in pixelsOnContour:
+                    visGraph.add_node(key, pos=(pixelsOnContour[key][0], pixelsOnContour[key][1]))
+                visGraph = self.add_edges_to_visGraph(pixelsOnContour, visGraph, cases)
+            else:
+                cellContourOrdered = []
         return(visGraph, cellContourOrdered)
 
     def extract_cell_contour(self, label, labeledImage):
@@ -892,9 +912,9 @@ class VisGraph:
                 dataAppend = [label, 0,0,0,0,0,0]
             self.shapeResultsTable.loc[0] = dataAppend
             if not os.path.isfile(self.outputFolder + '/ShapeResultsTable.csv'):
-                shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False)
+                self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False)
             else:
-                shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False)
+                self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False)
 
     def find_number_of_cell_junctions(self, cellContour):
         """
@@ -960,9 +980,9 @@ class VisGraph:
             dataLobes = [key, lobe1, neck1, neck2, lobelength * resolution, neckwidth * resolution]
             self.lobeParameters.loc[0] = dataLobes
             if not os.path.isfile(self.outputFolder + '/LobeParameters.csv'):
-                shapeResultsTable.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False)
+                self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False)
             else:
-                shapeResultsTable.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False, header=False)
+                self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False, header=False)
         self.create_visual_output(key, visGraph, cellContour, cellJunctions, lobes, necks, correlatedJunctions, pos)
 
     def find_lobe_between_necks(self, lobes, nodes):
@@ -1055,7 +1075,9 @@ class VisGraphOther:
         self.shapeResultsTable = pd.DataFrame(columns=['File', 'LabeledImage', 'GraphNumber', '#Nodes', '#Edges', 'Complexity'])
         if os.path.isfile(self.outputFolder + '/visibilityGraphs.gpickle'):
             os.remove(self.outputFolder + '/visibilityGraphs.gpickle')
+        if os.path.isfile(self.outputFolder + '/cellContours.gpickle'):
             os.remove(self.outputFolder + '/cellContours.gpickle')
+        if os.path.isfile(self.outputFolder + '/shapeResultsTable.csv'):
             os.remove(self.outputFolder + '/shapeResultsTable.csv')
 
         if self.inputType == 'image':
@@ -1118,7 +1140,7 @@ class VisGraphOther:
                 visGraphsOtherPickle = open(self.outputFolder + '/visibilityGraphs.gpickle', 'ab')
                 pickle.dump(visGraph, visGraphsOtherPickle)
                 visGraphsOtherPickle.close()
-                cellContoursOtherPickle = open(self.outputFolder + '/vcellContours.gpickle', 'ab')
+                cellContoursOtherPickle = open(self.outputFolder + '/cellContours.gpickle', 'ab')
                 pickle.dump(cellContour, cellContoursOtherPickle)
                 cellContoursOtherPickle.close()
         return(visGraphsAll)
@@ -1132,7 +1154,7 @@ class VisGraphOther:
         contourImage, cellContourOrdered = self.extract_cell_contour(label, labeledImage)
         if len(cellContourOrdered) != 0:
             pixelsOnContour = interpolate_contour_pixels(cellContourOrdered, resolution)
-            if len(pixelsOnContour) != 0:
+            if len(pixelsOnContour) != 0 and len(pixelsOnContour) >= 4:
                 for key in pixelsOnContour:
                     visGraph.add_node(key, pos=(pixelsOnContour[key][0], pixelsOnContour[key][1]))
                 visGraph = self.add_edges_to_visGraph(pixelsOnContour, visGraph, cases)
@@ -1188,9 +1210,9 @@ class VisGraphOther:
         dataAppend = [fileName, labeledFile, index, visGraph.number_of_nodes(), visGraph.number_of_edges(), sigma]
         self.shapeResultsTable.loc[0] = dataAppend
         if not os.path.isfile(self.outputFolder + '/ShapeResultsTable.csv'):
-            shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False)
+            self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False)
         else:
-            shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False)
+            self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False)
 
     def compute_graph_complexity(self, visGraph):
         """
@@ -1540,7 +1562,7 @@ def evaluate_angle(x, y, endpoints, image):
         if xPos2 < xPos1:
             angleBetweenEndpoints = angle180([yPos2 - yPos1, xPos2 - xPos1])
         else:
-            angleBetweenEndpoints angle180([yPos1 - yPos2, xPos1 - xPos2])
+            angleBetweenEndpoints = angle180([yPos1 - yPos2, xPos1 - xPos2])
         allAngles = [angleEndpoint1, angleEndpoint2, angleBetweenEndpoints]
     return(allAngles, rows, columns)
 
@@ -1588,7 +1610,7 @@ def detect_crossings_and_endpoints(skeletonImage, mode='both', output='image'):
                 detected_nodes[x, y] = 2
                 node_list.append([x, y])
             if L == 2:
-                windowDetected, _ = create_window(dtected_nodes, x, y, 1, 2, 1, 2)
+                windowDetected, _ = create_window(detected_nodes, x, y, 1, 2, 1, 2)
                 windowDetected[x - winBounds[0], y - winBounds[2]] = 0
                 labeledWindowConnectivity, Lconnectivity = sp.ndimage.label(windowDetected, np.ones((3, 3)))
                 if 2 not in windowDetected and Lconnectivity == 1:
