@@ -750,7 +750,7 @@ class VisGraph:
             except FileNotFoundError:
                 messagebox.showinfo("Warning", "No pre-processed files were found for the selected image.")
         self.shapeResultsTable = pd.DataFrame(columns=['CellNumber', 'Lobes', 'Necks', 'Junctions', 'JunctionLobes', 'Complexity', 'Circularity', 'Area', 'Perimeter'])
-        self.lobeParameters = pd.DataFrame(columns=['CellLabel', 'NodeLabelLobe', 'NodeLabelNeck1', 'NodeLabelNeck2', 'LobeLength', 'NeckWidth'])
+        self.lobeParameters = pd.DataFrame(columns=['CellLabel', 'NodeLabelLobe', 'NodeLabelNeck1', 'NodeLabelNeck2', 'LobeLength', 'NeckWidth', 'protrusionDepth', 'protrusionWidth'])
         if os.path.isfile(self.outputFolder + '/visibilityGraphs.gpickle'):
             os.remove(self.outputFolder + '/visibilityGraphs.gpickle')
         if os.path.isfile(self.outputFolder + '/cellContours.gpickle'):
@@ -958,6 +958,7 @@ class VisGraph:
         calculate the neck width and lobe length for a selected pavement cell and create a graphic output for lobe and neck positions
         """
         pos = nx.get_node_attributes(visGraph, 'pos')
+        protrusionDepthOfCell, protrusionWidthOfCell = self.calculate_protrusion_depth_and_width_for(key, visGraph, cellContour, cellJunctions)
         for index in range(len(necks)):
             if index == len(necks) - 1:
                 neck1, neck2 = necks[index], necks[0]
@@ -977,13 +978,26 @@ class VisGraph:
                 lobe1 = lobe[0]
                 lobelength = self.calculate_lobe_length(neck1, neck2, lobe1, pos)
             neckwidth = euclidean(pos[neck1], pos[neck2])
-            dataLobes = [key, lobe1, neck1, neck2, lobelength * resolution, neckwidth * resolution]
+            # add protusion depth and protusion width to dataLobes
+            protrusionDepth = protrusionDepthOfCell[index]
+            protrusionWidth = protrusionWidthOfCell[index]
+            dataLobes = [key, lobe1, neck1, neck2, lobelength * resolution,
+                         neckwidth * resolution,  protrusionDepth, protrusionWidth]
             self.lobeParameters.loc[0] = dataLobes
             if not os.path.isfile(self.outputFolder + '/LobeParameters.csv'):
                 self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False)
             else:
                 self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False, header=False)
         self.create_visual_output(key, visGraph, cellContour, cellJunctions, lobes, necks, correlatedJunctions, pos)
+
+    def calculate_protrusion_depth_and_width_for(self, key, visGraph, cellContour, cellJunctions):
+        extractionDictForTriWayJunction = {"cellLabel":key, "labelledImage":self.labeledImage}
+        protrusionCalculator = CellProtrusionPropertyCalculator(visGraph, allTriWayJunctions=cellJunctions,
+                                                    contour=cellContour,
+                                                    extractionDictForTriWayJunction=extractionDictForTriWayJunction)
+        protrusionDepthOfCell = protrusionCalculator.GetProtrusionDepths()
+        protrusionWidthOfCell = protrusionCalculator.GetProtrusionWidthAtHalfHeight()
+        return protrusionDepthOfCell, protrusionWidthOfCell
 
     def find_lobe_between_necks(self, lobes, nodes):
         """
@@ -1063,6 +1077,225 @@ class VisGraph:
         edgesCompleteGraph = (visGraph.number_of_nodes() * (visGraph.number_of_nodes() - 1)) * 0.5
         delta = visGraph.number_of_edges() / edgesCompleteGraph
         return(delta)
+
+class CellProtrusionPropertyCalculator (object):
+
+    def __init__(self, visGraph, triWayJunctionPos, cellContour, extractionDictForTriWayJunction=False):
+        self.visGraph = visGraph # visibility graph (networkx graph) with 'pos' and 'LobeNeckNone' node attributes
+        self.triWayJunctionPos = triWayJunctionPos # 2D array with each row being the coordinates of one tri-way junction in an ordered fashion
+        self.cellContour = cellContour
+        self.extractionDictForTriWayJunction = extractionDictForTriWayJunction
+        self.calcProtrusionDepthAndWidth()
+
+    def calcProtrusionDepthAndWidth(self):
+        self.orderedContour = self.extractOrderedContour()
+        self.cellOutlineRing = self.createLinearRingFromContour()
+        if self.extractionDictForTriWayJunction:
+            labelledImage = self.extractionDictForTriWayJunction["labelledImage"]
+            cellLabel = self.extractionDictForTriWayJunction["cellLabel"]
+            self.triWayJunctionPos = self.extractTriWayJunctions(cellLabel, self.visGraph, self.triWayJunctionPos, labelledImage)
+        self.lobePos, self.selectedLobeKeys = self.extractPositionOfFromVisibilityGraph(undulationType="Lobe")
+        self.protrusionDepths = self.calcShortestDistanceOfPointsToPolygon(self.triWayJunctionPos, self.lobePos)
+        self.protrusionWidthAtHalfHeight = self.calcWidthAtHalfHeightFor(self.triWayJunctionPos, self.protrusionDepths)
+
+    def extractOrderedContour(self):
+        orderedContour = self.cellContour
+        if np.any(orderedContour[0,:] != orderedContour[-1,:]):
+            orderedContour = np.concatenate([orderedContour[:,:], orderedContour[0,:].reshape(1,2)])
+        return orderedContour
+
+    def createLinearRingFromContour(self):
+        cellOutlineRing = self.createLinearRingFromCoordinates(self.orderedContour)
+        assert cellOutlineRing.is_valid, "The cell contour of cell label is not valid. Contour: {}".format(self.orderedContour)
+        return cellOutlineRing
+
+    def createLinearRingFromCoordinates(self, coordinates):
+        return LinearRing(asLineString(coordinates))
+
+    def extractTriWayJunctions(self, cellLabel, visGraph, allTriWayJunctions, labelledImage):
+        cellLabelInLabelledImage = cellLabel+1
+        unordedJunctions = self.extractJunctionOfCell(allTriWayJunctions, cellLabelInLabelledImage, labelledImage)
+        unordedJunctions = self.clipTriWayJunctionToCellOutline(self.cellOutlineRing, unordedJunctions)
+        orderedTriWayJunctions = self.orderJunctions(unordedJunctions, self.orderedContour)
+        return orderedTriWayJunctions
+
+    def extractJunctionOfCell(self, triWayJunctions, cellLabel, labelledImage):
+        cellImage = np.zeros(labelledImage.shape)
+        cellImage[labelledImage == cellLabel] = 1
+        cellImage = skimage.morphology.dilation(cellImage, np.ones((8,8)))
+        idx = np.where(cellImage[triWayJunctions[:,0], triWayJunctions[:,1]] == 1)[0]
+        return triWayJunctions[idx,:].copy()
+
+    def clipTriWayJunctionToCellOutline(self, cellOutlineRing, junctionCoordinates):
+        for i in range(len(junctionCoordinates)):
+            currentTriWayJunction = Point(junctionCoordinates[i])
+            correctedTriWayJunction = cellOutlineRing.interpolate(cellOutlineRing.project(currentTriWayJunction))
+            if not self.isCorrectedTriWayJunctionOnOutline(np.asarray(list(cellOutlineRing.coords)), junctionCoordinates[i]):
+                junctionCoordinates[i] = self.correctToOutline(np.asarray(list(cellOutlineRing.coords)), list(correctedTriWayJunction.coords))
+            else:
+                junctionCoordinates[i] = list(correctedTriWayJunction.coords)[0]
+        return junctionCoordinates
+
+    def isCorrectedTriWayJunctionOnOutline(self, cellOutline, junction):
+        return np.any((cellOutline[:, 0] == junction[0]) & (cellOutline[:, 1] == junction[1]))
+
+    def correctToOutline(self, cellOutline, junction):
+        xyDistances = cellOutline - junction
+        bestIdx = np.argmin(np.linalg.norm(xyDistances, axis=1))
+        return cellOutline[bestIdx,:]
+
+    def orderJunctions(self, unordedJunctions, orderedContour, threshold=5):
+        ordedJunctions = []
+        if unordedJunctions.shape[0] < 3:
+            return unordedJunctions
+        for xyCoor in orderedContour:
+            distances = np.linalg.norm(unordedJunctions-xyCoor, axis=1)
+            idx = np.where(distances < threshold)[0]
+            if len(idx) == 1:
+                ordedJunctions.append(unordedJunctions[idx,:].tolist()[0])
+                unordedJunctions = np.delete(unordedJunctions, idx, axis=0)
+                if len(unordedJunctions) == 0:
+                    break
+        ordedJunctions = np.asarray(ordedJunctions)
+        return ordedJunctions
+
+    def extractPositionOfFromVisibilityGraph(self, undulationType="Lobe"):
+        selectedNodeKeys = []
+        coordinates = []
+        nodeUndulationAttribute = nx.get_node_attributes(self.visGraph, 'LobeNeckNone')
+        allCoordinates = nx.get_node_attributes(self.visGraph, 'pos')
+        for nodeKey, undulationProperty in nodeUndulationAttribute.items():
+            if undulationProperty == undulationType:
+                coordinates.append(allCoordinates[nodeKey])
+                selectedNodeKeys.append(nodeKey)
+        coordinates = np.asarray(coordinates)
+        return coordinates, selectedNodeKeys
+
+    def calcShortestDistanceOfPointsToPolygon(self, polygonVertices, points):
+        cellPolygon = asPolygon(polygonVertices)
+        cellPolygonRing = self.createLinearRingFromCoordinates(polygonVertices)
+        nrOfUndulations = points.shape[0]
+        undulationDepths = np.zeros(nrOfUndulations)
+        for i in range(nrOfUndulations):
+            undulationPoint = Point(points[i, :])
+            isInsideCell = cellPolygon.contains(undulationPoint)
+            undulationDepths[i] = cellPolygonRing.distance(undulationPoint)
+            if isInsideCell:
+                undulationDepths[i] *= -1
+        return undulationDepths
+
+    def calcWidthAtHalfHeightFor(self, polygonVertices, depthOfCell):
+        nodeCoordinates = nx.get_node_attributes(self.visGraph, 'pos')
+        cellPolygonRing = self.createLinearRingFromCoordinates(polygonVertices)
+        widths = np.zeros(len(self.selectedLobeKeys))
+        for i in range(len(self.selectedLobeKeys)):
+            currentLobeNodeKey = self.selectedLobeKeys[i]
+            undulationPoint = Point(nodeCoordinates[currentLobeNodeKey])
+            if depthOfCell[i] != 0:
+                widths[i] = self.calcWidthAtHalfHeight(undulationPoint, cellPolygonRing)
+            else:
+                widths[i] = np.NaN
+        return widths
+
+    def calcWidthAtHalfHeight(self, undulationPoint, cellPolygonRing,
+                              lengthOfParallelSegment=400, recursiveCallIncreasingSegmentLength=False,
+                              recursiveCallNr=0):
+        auxiliaryLineAtHalfHeight = self.createParallelToPolygonLineAtHalfHeight(undulationPoint,
+                                            cellPolygonRing, lengthOfParallelSegment=lengthOfParallelSegment)
+        intersects = self.cellOutlineRing.intersection(auxiliaryLineAtHalfHeight)
+        intersects = self.correctPotentialLineString(intersects, undulationPoint)
+        widthAtHalfHeight = np.NaN
+        if type(intersects) != type(Point()):
+            if len(intersects) > 2:
+                lotOfUDToPolygon = LineString([undulationPoint, cellPolygonRing.interpolate(cellPolygonRing.project(undulationPoint))])
+                intersects = self.reduceToImportantentIntersections(intersects, lotOfUDToPolygon)
+                undulationWidthAtHalfHeightLine = LineString(intersects)
+                widthAtHalfHeight = undulationWidthAtHalfHeightLine.length
+            if len(intersects) == 2:
+                undulationWidthAtHalfHeightLine = LineString(intersects)
+                widthAtHalfHeight = undulationWidthAtHalfHeightLine.length
+        return widthAtHalfHeight
+
+    def createParallelToPolygonLineAtHalfHeight(self, undulationPoint, cellPolygonRing,
+                                                lengthOfParallelSegment=200):
+        halfUDPoint = self.calcPointAtHalfUndulationDepth(undulationPoint, cellPolygonRing)
+        parallelSegmentVector = self.calcVectorOfClosestPolygonSegment(undulationPoint, cellPolygonRing)
+        factorForVector = lengthOfParallelSegment / (2 * np.linalg.norm(parallelSegmentVector))
+        startPointOfParallelSegemnt = np.asarray(halfUDPoint.coords)[0] + factorForVector * parallelSegmentVector
+        endPointOfParallelSegemnt = np.asarray(halfUDPoint.coords)[0] - factorForVector * parallelSegmentVector
+        auxiliaryLineAtHalfHeight = LineString([startPointOfParallelSegemnt, endPointOfParallelSegemnt])
+        return auxiliaryLineAtHalfHeight
+
+    def calcPointAtHalfUndulationDepth(self, undulationPoint, cellPolygonRing):
+        pointOnRing = cellPolygonRing.interpolate(cellPolygonRing.project(undulationPoint))
+        undulationDepthLine = LineString([undulationPoint, pointOnRing])
+        distance = undulationDepthLine.length
+        halfUDPoint = undulationDepthLine.interpolate(distance/2)
+        return halfUDPoint
+
+    def calcVectorOfClosestPolygonSegment(self, undulationPoint, cellPolygonRing):
+        closestPolygonSegment = self.findClosestLineSegment(cellPolygonRing, undulationPoint)
+        startOfSegement, endOfSegment = list(closestPolygonSegment.coords)
+        closestSegmentVector = np.asarray(endOfSegment) - np.asarray(startOfSegement)
+        return closestSegmentVector
+
+    def findClosestLineSegment(self, linearRing, point):
+        oldPoint = None
+        splitRingSegments = []
+        for newPoint in linearRing.coords:
+            if oldPoint:
+                splitRingSegments.append(LineString([newPoint, oldPoint]))
+            oldPoint = newPoint
+        argMin = None
+        minDistance = np.inf
+        for i in range(len(splitRingSegments)):
+            distance = splitRingSegments[i].distance(point)
+            if distance < minDistance:
+                minDistance = distance
+                argMin = i
+        return splitRingSegments[argMin]
+
+    def correctPotentialLineString(self, potentialLineStrings, referencePoint):
+        if type(potentialLineStrings) != type(Point()):
+            if type(potentialLineStrings) == type(LineString()):
+                potentialLineStrings = list(potentialLineStrings.coords)
+            else:
+                potentialLineStrings = list(potentialLineStrings)
+                containsLine = False
+                for i in range(len(potentialLineStrings)):
+                    if type(potentialLineStrings[i]) == type(LineString()):
+                        minDistances = np.inf
+                        closestPointToReferencePoint = None
+                        for point in potentialLineStrings[i].coords:
+                            point = Point(point)
+                            d = referencePoint.distance(point)
+                            if d < minDistances:
+                                closestPointToReferencePoint = point
+                        potentialLineStrings[i] = closestPointToReferencePoint
+            potentialLineStrings = MultiPoint(potentialLineStrings)
+        return potentialLineStrings
+
+    def reduceToImportantentIntersections(self, intersects, lotOfUDToPolygon):
+        intersectionCoordinates = list(intersects)
+        direction = 0
+        interlinkedIntersects = LineString(intersectionCoordinates)
+        directionChecked = 0
+        while interlinkedIntersects.intersects(lotOfUDToPolygon) or directionChecked < 2:
+            if len(intersectionCoordinates) == 2:
+                break
+            removedIntersection = intersectionCoordinates.pop(direction)
+            interlinkedIntersects = LineString(intersectionCoordinates)
+            if not interlinkedIntersects.intersects(lotOfUDToPolygon):
+                intersectionCoordinates.insert(direction, removedIntersection)
+                direction = -1
+                directionChecked += 1
+        return intersectionCoordinates
+
+    def GetProtrusionDepths(self):
+        return self.protrusionDepths
+
+    def GetProtrusionWidthAtHalfHeight(self):
+        return self.protrusionWidthAtHalfHeight
 
 class VisGraphOther:
 
