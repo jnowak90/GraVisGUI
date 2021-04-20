@@ -2,7 +2,7 @@ from tkinter import *
 from tkinter import Tk, Label, Button, Frame, Canvas, Entry, Checkbutton, Radiobutton, OptionMenu, ttk, messagebox, filedialog
 from tkinter.ttk import Notebook
 import tkinter.scrolledtext as ScrolledText
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 import logging
 import os
 import sys
@@ -26,10 +26,12 @@ import pickle
 import time
 import sklearn
 from sklearn import decomposition
+import read_roi
 import matplotlib
 from matplotlib.legend_handler import HandlerPatch
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
+plt.rcParams.update({'figure.max_open_warning': 0})
 
 # add class for logging messages
 class LogHandler(logging.Handler):
@@ -70,8 +72,8 @@ class ShapeGui:
 
         ### settings for adjustable GUI size
         self.root.title('GraVis - a Network-Based Shape Descriptor')
-        self.height = int(self.root.winfo_screenheight() * 0.9)
-        self.width = int(self.height * 1.25)
+        self.height = int(self.root.winfo_screenheight() * 0.85)
+        self.width = int(self.height * 1.35)
         self.root.geometry('%dx%d' % (self.width, self.height))
 
         ##### tabs #####
@@ -91,7 +93,7 @@ class ShapeGui:
         self.FrameHome.grid(row=0, column=0, padx=5, pady=5)
         self.labelWelcome = Label(self.FrameHome, text="Welcome to GraVis, a framework for network-based \nshape description and comparison.", justify=LEFT, font=(None, 14)).grid(row=0, column=0, sticky=W, padx=20, pady=40)
         self.labelDescriptionHeader = Label(self.FrameHome, text="Shape description", justify=LEFT, font=(None, 12, 'bold')).grid(row=1, column=0, sticky=W, padx=20)
-        self.labelDescription = Label(self.FrameHome, text="To describe pavement cell shapes, images are pre-processed to segment individual cells. For each cell a visibility graph \nis then created which can be used for shape comparison or to detect lobes and necks.\n\nInput: images of pavement cells (.tif, .png. .jpg), or binary images of other shapes (.tif, .png, .jpg) \nOutput: visibility graphs (.gpickle files) \n\n1. Select an image or image folder. \n2. Select the analysis of pavement cells or other shapes. \n3. Select parameters for analysis. \n4. Press 'Run' to start analysis.", justify=LEFT, font=(None, 12)).grid(row=2, column=0, sticky=NW, padx=20)
+        self.labelDescription = Label(self.FrameHome, text="To describe pavement cell shapes, images are pre-processed to segment individual cells. For each cell a visibility graph \nis then created which can be used for shape comparison or to detect lobes and necks.\n\nInput: images of pavement cells (.tif, .png. .jpg, .roi), or binary images of other shapes (.tif, .png, .jpg, .roi) \nOutput: visibility graphs (.gpickle files) \n\n1. Select an image or image folder. \n2. Select the analysis of pavement cells or other shapes. \n3. Select parameters for analysis. \n4. Press 'Run' to start analysis.", justify=LEFT, font=(None, 12)).grid(row=2, column=0, sticky=NW, padx=20)
         self.labelComparisonHeader = Label(self.FrameHome, text="\nShape comparison", justify=LEFT, font=(None, 12, 'bold')).grid(row=3, column=0, sticky=W, padx=20)
         self.labelComparison = Label(self.FrameHome, text="Shapes are compared by calculating the distance between their visibility graphs. If a single set of visibility graphs is \nselected, each graph is assigned a numerical label. If multiple sets of visibility graphs are selected, the user \nhas to assign labels.\n\nInput: visibility graphs (gpickle files) \nOutput: distance matrix (.npy file)\n\n1. Add graphs for the computation of the distance matrix. \n2. Add labels to graphs if more than one set was selected. \n3. Select optional plots. \n4. Press 'Run' to start analysis.", justify=LEFT, font=(None, 12)).grid(row=4, column=0, sticky=NW, padx=20)
 
@@ -100,8 +102,8 @@ class ShapeGui:
         self.FrameDescription.grid(row=0, column=0, padx=5, pady=5)
         self.buttonOpenImage = Button(self.FrameDescription, text="Open Image", command=self.select_and_show_image).grid(row=0, column=0, sticky=E)
         self.buttonOpenFolder = Button(self.FrameDescription, text="Open Folder", command=self.select_and_show_folder).grid(row=0, column=1, sticky=W)
-        self.canvasOriginal = Canvas(self.FrameDescription, width = int(self.widthTab*0.45), height = int(self.widthTab*0.45), bg='honeydew')
-        self.canvasOriginal.create_text(50, 50, text="First select an image or \nan image folder.", anchor=W, tag="textCanvas")
+        self.canvasOriginal = Canvas(self.FrameDescription, width = int(self.widthTab*0.35), height = int(self.widthTab*0.35), bg='honeydew')
+        self.canvasOriginal.create_text(40, 40, text="First select an \nimage or an image \nfolder.", anchor=W, tag="textCanvas", justify=CENTER)
         self.canvasOriginal.grid(row=1, column=0, padx=5, pady=5, sticky=N, columnspan=2)
         self.settingsDescription = Frame(self.FrameDescription, width=self.widthTab)
         self.settingsDescription.grid(row=2, column=0, sticky=W, columnspan=2)
@@ -113,7 +115,7 @@ class ShapeGui:
         self.parametersDescription.grid(row=3, column=0, columnspan=2)
         self.labelSegemented = Label(self.FrameDescription, text="Segmented image:", anchor=W, justify=LEFT).grid(row=0, column=2, sticky=W)
         self.quitDescription = Button(self.FrameDescription, text="Exit", command=self.root.destroy, highlightbackground='medium sea green').grid(row=0, column=3, sticky=E)
-        self.canvasSegmented = Canvas(self.FrameDescription, width = int(self.widthTab*0.8), height = int(self.widthTab*0.8), bg='honeydew')
+        self.canvasSegmented = Canvas(self.FrameDescription, width = int(self.widthTab*0.6), height = int(self.widthTab*0.6), bg='honeydew')
         self.canvasSegmented.grid(row=1, column=2, rowspan=2, columnspan=2)
         self.scrolltext = ScrolledText.ScrolledText(self.FrameDescription, state='disabled')
         self.scrolltext.configure(font='TkFixedFont', background='snow2', height=int(self.widthTab*0.45/15), width=int(self.widthTab*0.8/7.5))
@@ -155,7 +157,7 @@ class ShapeGui:
         """
         open and show selected images
         """
-        imageRaw = Image.open(imagePath)
+        imageRaw = Image.open(imagePath).convert('RGB')
         if imageHeight != None:
             imageResized = imageRaw.resize((int(self.widthTab * imageWidth), int(self.widthTab * imageHeight)), Image.ANTIALIAS)
         else:
@@ -184,11 +186,16 @@ class ShapeGui:
         """
         if self.lastDir == "":
             self.lastDir = './'
-        self.fileName = filedialog.askopenfilename(initialdir=self.lastDir, title="Select image!", filetypes=(("png images", "*.png"), ("tif images", "*.tif"), ("tif images", "*.TIF"), ("tif images", "*.tiff"), ("tif images", "*.TIFF"), ("tif images", "*.jpeg"), ("jpeg images", "*.jpg")))
+        self.fileName = filedialog.askopenfilename(initialdir=self.lastDir, title="Select image!", filetypes=(("png images", "*.png"), ("tif images", "*.tif"), ("tif images", "*.TIF"), ("tif images", "*.tiff"), ("tif images", "*.TIFF"), ("tif images", "*.jpeg"), ("jpeg images", "*.jpg"), ("roi files", "*.roi"), ("roi files", "*.ROI")))
         self.fileType = "image"
-        self.display_original_image(self.fileName)
-        if self.fileName != "":
-            self.lastDir = os.path.dirname(self.fileName)
+        self.roiInput = False
+        if self.fileName[-3:] != 'roi' and self.fileName[-3:] != 'ROI':
+            self.display_original_image(self.fileName)
+            if self.fileName != "":
+                self.lastDir = os.path.dirname(self.fileName)
+        else:
+            self.roiInput = True
+            self.show_roi_image(self.fileName)
         show_Message("Opened image: " + self.fileName)
 
     def select_and_show_folder(self):
@@ -199,17 +206,53 @@ class ShapeGui:
             self.lastDir = './'
         self.directoryName = filedialog.askdirectory()
         self.fileType = "directory"
-        self.fileList = [item for sublist in [glob.glob(self.directoryName + ext) for ext in ["/*.png", "/*.jpg", "/*.jpeg", "/*.tif", "/*.tiff", "/*.TIF", "/*.TIFF"]] for item in sublist]
+        self.fileList = [item for sublist in [glob.glob(self.directoryName + ext) for ext in ["/*.png", "/*.jpg", "/*.jpeg", "/*.tif", "/*.tiff", "/*.TIF", "/*.TIFF", "/*.ROI", "/*.roi"]] for item in sublist]
         self.fileName = self.fileList[0]
-        self.display_original_image(self.fileName)
-        show_Message("Selected image folder: " + self.directoryName)
-        show_Message("Detected " + str(len(self.fileList)) + " image files in the folder.")
+        self.roiInput = False
+        imageTypes = np.unique([element[-3:] for element in self.fileList])
+        if 'roi' in imageTypes or 'ROI' in imageTypes:
+            if len(imageTypes) == 1:
+                self.roiInput = True
+                self.show_roi_image(self.fileName)
+                show_Message("Selected image folder: " + self.directoryName)
+                show_Message("Detected " + str(len(self.fileList)) + " image files in the folder.")
+            else:
+                messagebox.showinfo("Warning", "The folder you selected includes ROI files and images. Please remove all non-Roi files or keep only images.")
+        else:
+            self.display_original_image(self.fileName)
+            show_Message("Selected image folder: " + self.directoryName)
+            show_Message("Detected " + str(len(self.fileList)) + " image files in the folder.")
 
     def display_original_image(self, filename):
         """
         plot original image in canvas
         """
-        self.imageOriginal = self.display_image(filename, 0.45, None)
+        self.imageOriginal = self.display_image(filename, 0.35, None)
+        self.canvasOriginal.create_image(0, 0, anchor=NW, image=self.imageOriginal)
+        self.canvasOriginal.config(background=self.origColor)
+        self.canvasOriginal.delete("textCanvas")
+
+    def show_roi_image(self, filename):
+        """
+        read roi coordinates and display resulting polygon
+        """
+        keyName = filename.split('/')[-1].split('.')[0]
+        roiFile = read_roi.read_roi_file(filename)
+        xCoordinates = roiFile[keyName]['x']
+        yCoordinates = roiFile[keyName]['y']
+        coords = list(zip(xCoordinates - np.min(xCoordinates) + 5, yCoordinates - np.min(yCoordinates) + 5))
+        sizeX, sizeY = np.max(xCoordinates - np.min(xCoordinates)) + 10, np.max(yCoordinates - np.min(yCoordinates)) + 10
+        if sizeX > int(self.widthTab * 0.35) or sizeY > int(self.widthTab * 0.35):
+            imageRaw = Image.new("RGB", (sizeX, sizeY), (255, 255, 255))
+            imageDrawing = ImageDraw.Draw(imageRaw)
+            imageDrawing.polygon(coords, fill=None, outline=(10, 200, 40))
+            imageResized = self.resize_image(imageRaw, int(self.widthTab * 0.35))
+        else:
+            imageRaw = Image.new("RGB", (int(self.widthTab * 0.35), int(self.widthTab * 0.35)), (255, 255, 255))
+            imageDrawing = ImageDraw.Draw(imageRaw)
+            imageDrawing.polygon(coords, fill=None, outline=(10, 200, 40))
+            imageResized = imageRaw
+        self.imageOriginal = ImageTk.PhotoImage(imageResized)
         self.canvasOriginal.create_image(0, 0, anchor=NW, image=self.imageOriginal)
         self.canvasOriginal.config(background=self.origColor)
         self.canvasOriginal.delete("textCanvas")
@@ -218,7 +261,7 @@ class ShapeGui:
         """
         plot segmentation image in canvas
         """
-        self.imageSegmented = self.display_image(pathToFolder + image, 0.8, None)
+        self.imageSegmented = self.display_image(pathToFolder + image, 0.6, None)
         self.canvasSegmented.create_image(0, 0, anchor=NW, image=self.imageSegmented)
         self.canvasSegmented.config(background=self.origColor)
         show_Message(msg)
@@ -238,7 +281,7 @@ class ShapeGui:
         else:
             self.parametersOther = Frame(self.FrameDescription, width=self.widthTab)
             self.parametersOther.grid(row=3, column=0, sticky='nsew', columnspan=2)
-            self.labelAnalysisOther = Label(self.parametersOther, text="Please provide binary images for the analysis \nof other objects. If an image folder was selected, \nthe visibility graphs of all images in the folder \nwill be saved in one file.", anchor=W, justify=LEFT).grid(row=0, column=0, padx=20, pady=20, sticky=W)
+            self.labelAnalysisOther = Label(self.parametersOther, text="Please provide binary images for the analysis or \n ROI files of other objects. If an image folder was selected, \nthe visibility graphs of all images in the folder \nwill be saved in one file.", anchor=W, justify=LEFT).grid(row=0, column=0, padx=20, pady=20, sticky=W)
             self.graphextractionSettings(self.parametersOther)
             self.RunDescription = Button(self.parametersOther, text="Run Analysis", highlightbackground='medium sea green', command=self.start_description_other)
             self.labelResolution.grid(row=1, column=0, padx=20, sticky=W)
@@ -260,9 +303,10 @@ class ShapeGui:
             self.checkNoise.grid(row=2, column=0, padx=20, sticky=W)
             self.checkRescaling.grid(row=3, column=0, padx=20, sticky=W)
             self.checkPlot.grid(row=4, column=0, padx=20, sticky=W)
-            self.labelResolution.grid(row=5, column=0, padx=20, sticky=W)
-            self.addResolution.grid(row=6, column=0, padx=20, sticky=W)
-            self.RunDescription.grid(row=7, column=0)
+            self.checkPlotLobes.grid(row=5, column=0, padx=20, sticky=W)
+            self.labelResolution.grid(row=6, column=0, padx=20, sticky=W)
+            self.addResolution.grid(row=7, column=0, padx=20, sticky=W)
+            self.RunDescription.grid(row=8, column=0)
         elif self.varAnalysis.get() == 'Pre-processing':
             self.parameterChoicesPP = Frame(self.parametersPCs, width=self.widthTab)
             self.parameterChoicesPP.grid(row=1, column=0, sticky='nsew')
@@ -277,13 +321,14 @@ class ShapeGui:
         else:
             self.parameterChoicesGE = Frame(self.parametersPCs, width=self.widthTab)
             self.parameterChoicesGE.grid(row=1, column=0, sticky='nsew')
-            self.labelGraphextraction = Label(self.parameterChoicesGE, text="This step should only be selected, if the pre-processing \nof this image was already done previously.", anchor=W, justify=LEFT)
+            self.labelGraphextraction = Label(self.parameterChoicesGE, text="This step should only be selected, if the pre-processing \nof this image was already done previously or ROI files are used.", anchor=W, justify=LEFT)
             self.graphextractionSettings(self.parameterChoicesGE)
             self.RunDescription = Button(self.parameterChoicesGE, text="Run Analysis", highlightbackground='medium sea green', command=self.start_description_PCs)
             self.labelGraphextraction.grid(row=1, column=0, padx=20, sticky=W)
-            self.labelResolution.grid(row=2, column=0, padx=20, sticky=W)
-            self.addResolution.grid(row=3, column=0, padx=20, sticky=W)
-            self.RunDescription.grid(row=4, column=0)
+            self.checkPlotLobes.grid(row=2, column=0, padx=20, sticky=W)
+            self.labelResolution.grid(row=3, column=0, padx=20, sticky=W)
+            self.addResolution.grid(row=4, column=0, padx=20, sticky=W)
+            self.RunDescription.grid(row=5, column=0)
 
     def preprocessingSettings(self, settings):
         """
@@ -303,11 +348,13 @@ class ShapeGui:
         """
         settings for graph extraction
         """
+        self.varPlotLobes = IntVar(value=1)
         self.varResolution = StringVar()
         if self.selectedImages.get() == 'pavement':
-            self.labelResolution = Label(settings, text="\n\nImage resolution (µm/px):")
+            self.checkPlotLobes = Checkbutton(settings, text="plot graphical output for detected lobes", variable=self.varPlotLobes)
+            self.labelResolution = Label(settings, text="\n\nImage resolution in µm/px: (e.g. 0.21 µm/px)")
         else:
-            self.labelResolution = Label(settings, text="\n\nPixel distance (px/node):")
+            self.labelResolution = Label(settings, text="\n\nPixel distance px/node: (e.g. 10 px/node)")
         self.addResolution = Entry(settings, textvariable=self.varResolution)
 
     def start_description_PCs(self):
@@ -315,26 +362,35 @@ class ShapeGui:
         workflow for the shape description framework
         """
         self.generatedOutput = False
+        self.roiFileList = False
         if self.fileName != "":
             if self.fileType == "image":
-                self.analyze_image(self.fileName)
+                self.analyze_image()
             else:
-                for file in self.fileList:
-                    self.fileName = file
-                    self.display_original_image(self.fileName)
-                    self.canvasOriginal.update()
-                    self.analyze_image(self.fileName)
+                if self.roiInput == False:
+                    for file in self.fileList:
+                        self.fileName = file
+                        self.display_original_image(self.fileName)
+                        self.canvasOriginal.update()
+                        self.analyze_image()
+                else:
+                    self.roiFileList = True
+                    self.fileName = self.fileList[0]
+                    self.analyze_image()
             if self.generatedOutput == True:
                 messagebox.showinfo("GraVis", "Analysis is done. \n\nResults were saved into: \n\n" + self.outputFolder)
                 self.filename = ""
         else:
             messagebox.showinfo("Warning", "No image was selected. Please open an image first before starting the analysis.")
 
-    def analyze_image(self, filename):
+    def analyze_image(self):
         """
         processing steps for PCs depending on user input
         """
-        self.outputFolder = filename.split('.')[:-1][0]
+        if self.roiFileList == False:
+            self.outputFolder = self.fileName.split('.')[:-1][0]
+        else:
+            self.outputFolder = ('/').join(self.fileName.split('/')[:-1]) + '/Results'
         if not os.path.exists(self.outputFolder):
             os.mkdir(self.outputFolder)
         if self.varAnalysis.get() == 'Pre-processing':
@@ -350,20 +406,25 @@ class ShapeGui:
         """
         start pre-processing pipeline
         """
-        msg = ""
-        if self.varEdges.get() == 1:
-            msg += "Selected artificial edge removal. "
-        if self.varNoise.get() == 1:
-            msg += "Selected noise removal. "
-        if self.varRescaling.get() == 1:
-            msg += "Selected image rescaling. "
-        if self.varPlot.get() == 1:
-            msg += "Selected plotting of intermediate steps."
-        msg += "\nStart pre-processing of the image."
-        show_Message(msg)
-        self.preprocessedImage = Preprocessor(self.fileName, self.varEdges.get(), self.varNoise.get(), self.varRescaling.get(), self.varPlot.get(), self.outputFolder)
-        self.display_segmented_image('/LabeledPavementCells.png', self.preprocessedImage.pathToFolder, "Show pre-processed image.")
-        show_Message("..." + str(self.preprocessedImage.labels-1) + " cells were detected")
+        if self.roiInput == False:
+            msg = ""
+            if self.varEdges.get() == 1:
+                msg += "Selected artificial edge removal. "
+            if self.varNoise.get() == 1:
+                msg += "Selected noise removal. "
+            if self.varRescaling.get() == 1:
+                msg += "Selected image rescaling. "
+            if self.varPlot.get() == 1:
+                msg += "Selected plotting of intermediate steps."
+            if self.varPlotLobes.get() == 1:
+                msg += "Selected plotting of lobe positions."
+            msg += "\nStart pre-processing of the image."
+            show_Message(msg)
+            self.preprocessedImage = Preprocessor(self.fileName, self.varEdges.get(), self.varNoise.get(), self.varRescaling.get(), self.varPlot.get(), self.outputFolder)
+            self.display_segmented_image('/LabeledPavementCells.png', self.preprocessedImage.pathToFolder, "Show pre-processed image.")
+            show_Message("..." + str(self.preprocessedImage.labels-1) + " cells were detected")
+        else:
+            messagebox.showinfo("Warning", "ROI files were selected. No pre-processing is neccessary for these files. Please select 'Graph extraction'.")
 
     def start_graphextraction(self):
         """
@@ -374,7 +435,7 @@ class ShapeGui:
                 messagebox.showinfo("Warning", "Please use a dot for floats (i.e. 0.23 µm/px).")
             else:
                 show_Message("\nStart graph extraction for detected cells.")
-                self.visibilityGraphs = VisGraph(self.preprocessedImage, self.varPlot.get(), self.varResolution.get(), self.outputFolder)
+                self.visibilityGraphs = VisGraph(self.fileName, self.preprocessedImage, self.varPlot.get(), self.varResolution.get(), self.outputFolder, self.varPlotLobes.get(), self.roiInput, self.roiFileList, self.fileList)
                 self.generatedOutput = True
         else:
             messagebox.showinfo("Warning", "No resolution was provided. Please enter the image resolution and run the analysis again.")
@@ -390,12 +451,13 @@ class ShapeGui:
                 if ',' in self.varResolution.get():
                     messagebox.showinfo("Warning", "Please use a dot for floats (i.e. 0.23 µm/px).")
                 else:
-                    self.visibilityGraphs = VisGraphOther(self.fileName, self.varResolution.get(), self.outputFolder, self.fileType, self.fileList)
+                    self.visibilityGraphs = VisGraphOther(self.fileName, self.varResolution.get(), self.outputFolder, self.fileType, self.fileList, self.roiInput)
                     messagebox.showinfo("GraVis", "Analysis is done. \n\nResults were saved into: \n\n" + self.outputFolder)
-                    if self.fileType == 'image':
-                        self.display_segmented_image('/LabeledShapes.png', self.outputFolder, "")
-                    else:
-                        self.display_segmented_image('/LabeledShapes_1.png', self.outputFolder, "")
+                    if self.roiInput == False:
+                        if self.fileType == 'image':
+                            self.display_segmented_image('/LabeledShapes.png', self.outputFolder, "")
+                        else:
+                            self.display_segmented_image('/LabeledShapes_1.png', self.outputFolder, "")
                     self.filename = ""
         else:
             messagebox.showinfo("Warning", "No image was selected. Please open an image first before starting the analysis.")
@@ -502,11 +564,16 @@ class Preprocessor:
         """
         import image from filename and convert to 8-bit 2D image
         """
-        show_Message("...Load image and convert to grayscale.")
-        rawImage = skimage.io.imread(filename, plugin='tifffile')
-        if len(rawImage) > 2:
+        show_Message("...Load image and convert to grayscale")
+        fileType = filename.split('.')[-1]
+        if fileType in ['tif', 'TIF', 'tiff', 'TIFF']:
+            rawImage = skimage.io.imread(filename, plugin='tifffile')
+        else:
+            rawImage = skimage.io.imread(filename)
+        if rawImage.shape[2] > 2:
             rawImage = skimage.color.rgb2gray(rawImage)
-        rawImage = skimage.util.img_as_ubyte(rawImage)
+        if rawImage.dtype != 'uint8':
+            rawImage = skimage.util.img_as_ubyte(skimage.exposure.rescale_intensity(rawImage))
         return(rawImage)
 
     def detect_edges(self, rawImage):
@@ -733,24 +800,16 @@ class Preprocessor:
 
 class VisGraph:
 
-    def __init__(self, preprocessedImage, plotIntermediate, resolution, outputFolder):
+    def __init__(self, filename, preprocessedImage, plotIntermediate, resolution, outputFolder, plotLobeOutput, roiInput, roiFileList, fileList):
+        self.filename = filename
         self.outputFolder = outputFolder
         self.plotIntermediate = plotIntermediate
         self.resolution = float(resolution)
-        if preprocessedImage != None:
-            self.skeletonImage = preprocessedImage.skeletonImage
-            self.branchlessSkeleton = preprocessedImage.branchlessSkeleton
-            self.labeledImage = preprocessedImage.labeledImage
-            self.labels = preprocessedImage.labels
-        else:
-            try:
-                self.skeletonImage = skimage.io.imread(self.outputFolder + '/skeletonImage.png') > 0
-                self.branchlessSkeleton = skimage.io.imread(self.outputFolder + '/branchlessSkeleton.png') > 0
-                self.labeledImage, self.labels = sp.ndimage.label(~self.branchlessSkeleton)
-            except FileNotFoundError:
-                messagebox.showinfo("Warning", "No pre-processed files were found for the selected image.")
-        self.shapeResultsTable = pd.DataFrame(columns=['CellNumber', 'Lobes', 'Necks', 'Junctions', 'JunctionLobes', 'Complexity', 'Circularity', 'Area', 'Perimeter'])
-        self.lobeParameters = pd.DataFrame(columns=['CellLabel', 'NodeLabelLobe', 'NodeLabelNeck1', 'NodeLabelNeck2', 'LobeLength', 'NeckWidth', 'protrusionDepth', 'protrusionWidth'])
+        self.plotLobeOutput = plotLobeOutput
+        self.roiInput = roiInput
+        self.roiFileList = roiFileList
+        self.fileList = fileList
+
         if os.path.isfile(self.outputFolder + '/visibilityGraphs.gpickle'):
             os.remove(self.outputFolder + '/visibilityGraphs.gpickle')
         if os.path.isfile(self.outputFolder + '/cellContours.gpickle'):
@@ -759,20 +818,81 @@ class VisGraph:
             os.remove(self.outputFolder + '/shapeResultsTable.csv')
         if os.path.isfile(self.outputFolder + '/LobeParameters.csv'):
             os.remove(self.outputFolder + '/LobeParameters.csv')
+        if self.roiInput == False:
+            if self.plotLobeOutput == 1:
+                if not os.path.exists(self.outputFolder + '/ResultsLobePositions'):
+                    try:
+                        os.makedirs(self.outputFolder + '/ResultsLobePositions')
+                    except OSError:
+                        messagebox.showinfo("Warning", "Creation of the results directory for graphical lobe positions failed.")
 
-        self.junctions = self.detect_threeway_junctions(self.skeletonImage, self.branchlessSkeleton, self.labeledImage)
-        self.visibilityGraphs, self.cellContours = self.visibility_graphs(self.labeledImage, self.labels, self.resolution)
+        if self.roiInput == False:
+            if preprocessedImage != None:
+                self.skeletonImage = preprocessedImage.skeletonImage
+                self.branchlessSkeleton = preprocessedImage.branchlessSkeleton
+                self.labeledImage = preprocessedImage.labeledImage
+                self.labels = preprocessedImage.labels
+            else:
+                try:
+                    self.skeletonImage = skimage.io.imread(self.outputFolder + '/skeletonImage.png') > 0
+                    self.branchlessSkeleton = skimage.io.imread(self.outputFolder + '/branchlessSkeleton.png') > 0
+                    self.labeledImage, self.labels = sp.ndimage.label(~self.branchlessSkeleton)
+                except FileNotFoundError:
+                    messagebox.showinfo("Warning", "No pre-processed files were found for the selected image.")
 
-        if not os.path.exists(self.outputFolder + '/resultsGraVis'):
-            try:
-                os.makedirs(self.outputFolder + '/resultsGraVis')
-            except OSError:
-                messagebox.showinfo("Warning", "Creation of the results directory failed.")
+            self.shapeResultsTable = pd.DataFrame(columns=['CellNumber', 'VisGraphNodes', 'VisGraphEdges', 'Lobes', 'Necks', 'Junctions', 'JunctionLobes', 'Complexity', 'Circularity', 'Area [px]', 'Perimeter [px]', 'Perimeter [µm]'])
+            self.lobeParameters = pd.DataFrame(columns=['CellLabel', 'NodeLabelLobe', 'PositionLobeX', 'PositionLobeY', 'NodeLabelNeck1', 'NodeLabelNeck2', 'LobeLength [µm]', 'NeckWidth [µm]', 'ProtrusionDepth [px]', 'ProtrusionWidth [px]'])
 
-        self.add_data_to_table(self.visibilityGraphs, self.cellContours, self.labeledImage, self.labels, self.junctions, self.resolution)
-        show_Message("\nGraVis is done!")
-        #CalculateUndulationDepthAndWidthForTissue()
+            self.junctions = self.detect_threeway_junctions(self.skeletonImage, self.branchlessSkeleton, self.labeledImage)
+            np.save(self.outputFolder + '/TriCellularJunctionPositions.npy', self.junctions)
+            self.visibilityGraphs, self.cellContours = self.visibility_graphs(self.labeledImage, self.labels, self.resolution)
+            self.add_data_to_table(self.visibilityGraphs, self.cellContours, self.labeledImage, self.labels, self.junctions, self.resolution)
+            show_Message("\nGraVis is done!")
+        else:
+            self.shapeResultsTable = pd.DataFrame(columns=['CellNumber', 'VisGraphNodes', 'VisGraphEdges', 'Lobes', 'Necks', 'Complexity', 'Perimeter [px]', 'Perimeter [µm]'])
+            self.lobeParameters = pd.DataFrame(columns=['CellLabel', 'NodeLabelLobe', 'PositionLobeX', 'PositionLobeY', 'NodeLabelNeck1', 'NodeLabelNeck2', 'LobeLength [µm]', 'NeckWidth [µm]'])
 
+            if self.roiFileList == False:
+                self.keyName, self.cellContour = self.read_roi_file(self.filename)
+                show_Message("...Create visibility graph for " + self.keyName)
+                self.visibilityGraph = self.create_visibility_graph_roi(self.cellContour, self.resolution)
+                self.save_contour_and_graph_roi(self.visibilityGraph, self.cellContour, self.outputFolder)
+                self.add_data_to_table_roi(self.visibilityGraph, self.cellContour, self.keyName, self.resolution)
+                show_Message("\nGraVis is done!")
+            else:
+                for index, file in enumerate(self.fileList):
+                    self.keyName, self.cellContour = self.read_roi_file(file)
+                    show_Message("...Create visibility graph " + str(index + 1) + " of " + str(len(self.fileList)))
+                    self.visibilityGraph = self.create_visibility_graph_roi(self.cellContour, self.resolution)
+                    self.save_contour_and_graph_roi(self.visibilityGraph, self.cellContour, self.outputFolder)
+                    self.add_data_to_table_roi(self.visibilityGraph, self.cellContour, self.keyName, self.resolution)
+                show_Message("\nGraVis is done!")
+
+    def read_roi_file(self, filename):
+        """
+        read roi file and return corresponding x/y coordinates
+        """
+        fileType = filename.split('/')[-1].split('.')[-1]
+        if fileType == 'roi' or fileType == 'ROI':
+            keyName = filename.split('/')[-1].split('.')[0]
+            roiFile = read_roi.read_roi_file(filename)
+            xCoordinates = roiFile[keyName]['x']
+            yCoordinates = roiFile[keyName]['y']
+            cellContour = np.array(list(zip(xCoordinates, yCoordinates)))
+            return(keyName, cellContour)
+        else:
+            messagebox.showinfo("Warning", "The folder you chose, inludes ROI files and other file types. Please remove files which are not ROI files for the analysis.")
+
+    def save_contour_and_graph_roi(self, visGraph, cellContour, outputFolder):
+        """
+        save the visibility graph and cell contour extracted from ROI file
+        """
+        cellContoursPickle = open(outputFolder + '/cellContours.gpickle', 'ab')
+        pickle.dump(cellContour, cellContoursPickle)
+        cellContoursPickle.close()
+        visGraphsPickle = open(outputFolder + '/visibilityGraphs.gpickle', 'ab')
+        pickle.dump(visGraph, visGraphsPickle)
+        visGraphsPickle.close()
 
     def detect_threeway_junctions(self, skeletonImage, branchlessSkeleton, labeledImage):
         """
@@ -825,15 +945,11 @@ class VisGraph:
         for label in range(2, labels+1):
             show_Message("......Graph " + str(label-1) + ' of ' + str(labels-1))
             visGraph, cellContour = self.create_visibility_graph(labeledImage, label, resolution)
-            if len(cellContour) != 0:
-                visGraphsAll[label-1] = visGraph
-                cellContoursAll[label-1] = cellContour
-                visGraphsPickle = open(self.outputFolder + '/visibilityGraphs.gpickle', 'ab')
-                pickle.dump(visGraph, visGraphsPickle)
-                visGraphsPickle.close()
-                cellContoursPickle = open(self.outputFolder + '/cellContours.gpickle', 'ab')
-                pickle.dump(cellContour, cellContoursPickle)
-                cellContoursPickle.close()
+            visGraphsAll[label-1] = visGraph
+            cellContoursAll[label-1] = cellContour
+            cellContoursPickle = open(self.outputFolder + '/cellContours.gpickle', 'ab')
+            pickle.dump(cellContour, cellContoursPickle)
+            cellContoursPickle.close()
         return(visGraphsAll, cellContoursAll)
 
     def create_visibility_graph(self, labeledImage, label, resolution):
@@ -842,17 +958,34 @@ class VisGraph:
         """
         visGraph = nx.Graph()
         pixelDistance = calculate_pixel_distance(resolution)
-        cases = ['FFFF0F212','0FFF0F212','1FFF0F212','F0FF0F212','00FF0F212','10FF0F212','F1FF0F212']
         contourImage, cellContourOrdered = self.extract_cell_contour(label, labeledImage)
         if len(cellContourOrdered) != 0:
             pixelsOnContour = interpolate_contour_pixels(cellContourOrdered, pixelDistance)
             if len(pixelsOnContour) >= 4:
                 for key in pixelsOnContour:
                     visGraph.add_node(key, pos=(pixelsOnContour[key][0], pixelsOnContour[key][1]))
-                visGraph = self.add_edges_to_visGraph(pixelsOnContour, visGraph, cases)
+                visGraph = self.add_edges_to_visGraph(pixelsOnContour, visGraph)
             else:
                 cellContourOrdered = []
         return(visGraph, cellContourOrdered)
+
+    def create_visibility_graph_roi(self, cellContour, resolution):
+        """
+        create visibilit graph from cell contour
+        """
+        visGraph = nx.Graph()
+        pixelDistance = calculate_pixel_distance(resolution)
+        if pixelDistance != 0:
+            pixelsOnContour = interpolate_contour_pixels(cellContour, pixelDistance)
+            if len(pixelsOnContour) >= 4:
+                for key in pixelsOnContour:
+                    visGraph.add_node(key, pos=(pixelsOnContour[key][0], pixelsOnContour[key][1]))
+                visGraph = self.add_edges_to_visGraph(pixelsOnContour, visGraph)
+            else:
+                show_Message("The contour you provided did not render enough nodes for the resulting visibility graph. Please change the resolution or provide a contour with more coordinates.")
+        else:
+            show_Message("The calculated optimal pixel distance equals zero with the resolution you provided. Please change the resolution.")
+        return(visGraph)
 
     def extract_cell_contour(self, label, labeledImage):
         """
@@ -871,10 +1004,11 @@ class VisGraph:
                 contourImage[xPos, yPos] = 1
         return(contourImage, cellContourOrdered)
 
-    def add_edges_to_visGraph(self, pixelsOnContour, visGraph, cases):
+    def add_edges_to_visGraph(self, pixelsOnContour, visGraph):
         """
         add edge to visGraph if the edge between two nodes lies inside the cell (concave)
         """
+        cases = ['FFFF0F212', '0FFF0F212', '1FFF0F212', 'F0FF0F212', '00FF0F212', '10FF0F212', 'F1FF0F212']
         Polygon = shapely.geometry.Polygon([[pixelsOnContour[key][1], pixelsOnContour[key][0]] for key in pixelsOnContour])
         Boundary = shapely.geometry.LineString(list(Polygon.exterior.coords))
         combs = itertools.combinations(range(len(pixelsOnContour)), 2)
@@ -902,19 +1036,60 @@ class VisGraph:
             if visGraph.number_of_nodes() != 0:
                 cellJunctions = self.find_number_of_cell_junctions(cellContour)
                 lobes, necks = self.count_lobes_and_necks(visGraph)
+                visGraph = self.add_lobe_and_neck_property(visGraph, necks, lobes)
+                visGraphsPickle = open(self.outputFolder + '/visibilityGraphs.gpickle', 'ab')
+                pickle.dump(visGraph, visGraphsPickle)
+                visGraphsPickle.close()
                 correlatedJunctions = self.correlate_junctions_and_lobes(visGraph, lobes, necks, cellJunctions)
-                self.calculate_lobe_and_neck_properties(label, visGraph, cellContour, cellJunctions, lobes, necks, correlatedJunctions, resolution)
+                self.calculate_lobe_and_neck_properties(label, visGraph, cellContour, cellJunctions, lobes,
+                necks, correlatedJunctions, resolution)
                 sigma = self.compute_graph_complexity(visGraph)
                 area = np.sum(cell)
                 circ = 4 * np.pi * area / len(cellContour) ** 2
-                dataAppend = [label, len(lobes), len(necks), len(cellJunctions), len(correlatedJunctions), sigma, circ, area, np.sum(cellContour)]
+                dataAppend = [label, visGraph.number_of_nodes(), visGraph.number_of_edges(), len(lobes), len(necks), len(cellJunctions), len(correlatedJunctions), sigma, circ, area, len(cellContour), len(cellContour) * resolution]
             else:
-                dataAppend = [label, 0,0,0,0,0,0]
+                visGraphsPickle = open(self.outputFolder + '/visibilityGraphs.gpickle', 'ab')
+                pickle.dump(visGraph, visGraphsPickle)
+                visGraphsPickle.close()
+                dataAppend = [label, 0, 0, 0, 0, 0, 0, 0, 0, 0, len(cellContour), len(cellContour) * resolution]
             self.shapeResultsTable.loc[0] = dataAppend
             if not os.path.isfile(self.outputFolder + '/ShapeResultsTable.csv'):
-                self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False)
+                self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, sep=';', decimal=',')
             else:
-                self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False)
+                self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False, sep=';', decimal=',')
+
+    def add_data_to_table_roi(self, visGraph, cellContour, label, resolution):
+        """
+        summarize all results in a table
+        """
+        if visGraph.number_of_nodes() != 0:
+            lobes, necks = self.count_lobes_and_necks(visGraph)
+            self.calculate_lobe_and_neck_properties_roi(label, visGraph, cellContour, lobes,
+            necks, resolution)
+            sigma = self.compute_graph_complexity(visGraph)
+            dataAppend = [label, visGraph.number_of_nodes(), visGraph.number_of_edges(), len(lobes), len(necks), sigma, len(cellContour), len(cellContour) * resolution]
+        else:
+            dataAppend = [label, 0, 0, 0, 0, 0, len(cellContour), len(cellContour) * resolution]
+        self.shapeResultsTable.loc[0] = dataAppend
+        if not os.path.isfile(self.outputFolder + '/ShapeResultsTable.csv'):
+            self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, sep=';', decimal=',')
+        else:
+            self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False, sep=';', decimal=',')
+
+    def add_lobe_and_neck_property(self, graph, neckIndices, lobeIndices):
+        """
+        add node property describing if a node was identified as lobe or neck
+        """
+        neckLobeProperty = {}
+        for nodeName in list(graph.nodes):
+            if nodeName in lobeIndices:
+                neckLobeProperty[nodeName] = "Lobe"
+            elif nodeName in neckIndices:
+                neckLobeProperty[nodeName] = "Neck"
+            else:
+                neckLobeProperty[nodeName] = "None"
+        nx.set_node_attributes(graph, neckLobeProperty, name="LobeNeckNone")
+        return(graph)
 
     def find_number_of_cell_junctions(self, cellContour):
         """
@@ -958,7 +1133,7 @@ class VisGraph:
         calculate the neck width and lobe length for a selected pavement cell and create a graphic output for lobe and neck positions
         """
         pos = nx.get_node_attributes(visGraph, 'pos')
-        protrusionDepthOfCell, protrusionWidthOfCell = self.calculate_protrusion_depth_and_width_for(key, visGraph, cellContour, cellJunctions)
+        protrusionDepthOfCell, protrusionWidthOfCell = self.calculate_protrusion_depth_and_width(key, visGraph, cellContour, cellJunctions)
         for index in range(len(necks)):
             if index == len(necks) - 1:
                 neck1, neck2 = necks[index], necks[0]
@@ -968,36 +1143,67 @@ class VisGraph:
                 neck1, neck2 = necks[index], necks[index + 1]
                 nodes = np.arange(neck1, neck2 + 1, 1)
                 lobe = self.find_lobe_between_necks(lobes, nodes)
-            if len(lobe) == 0:
-                lobe1 = 'no lobe found'
-                lobelength = 0
-            elif len(lobe) > 2:
-                lobe1 = 'more than one lobe found'
-                lobelength = 0
-            else:
-                lobe1 = lobe[0]
-                lobelength = self.calculate_lobe_length(neck1, neck2, lobe1, pos)
             neckwidth = euclidean(pos[neck1], pos[neck2])
-            # add protusion depth and protusion width to dataLobes
             protrusionDepth = protrusionDepthOfCell[index]
             protrusionWidth = protrusionWidthOfCell[index]
-            dataLobes = [key, lobe1, neck1, neck2, lobelength * resolution,
-                         neckwidth * resolution,  protrusionDepth, protrusionWidth]
+            if len(lobe) == 0:
+                dataLobes = [key, 'no lobe found', None, None, neck1, neck2, None, neckwidth * resolution, protrusionDepth, protrusionWidth]
+            elif len(lobe) > 2:
+                for matchedLobe in lobe:
+                    lobelength = self.calculate_lobe_length(neck1, neck2, matchedLobe, pos)
+                    dataLobes = [key, matchedLobe, pos[matchedLobe][0], pos[matchedLobe][1], neck1, neck2, lobelength * resolution, neckwidth * resolution, protrusionDepth, protrusionWidth]
+            else:
+                lobelength = self.calculate_lobe_length(neck1, neck2, lobe[0], pos)
+                dataLobes = [key, lobe[0], pos[lobe[0]][0], pos[lobe[0]][1], neck1, neck2, lobelength * resolution, neckwidth * resolution, protrusionDepth, protrusionWidth]
             self.lobeParameters.loc[0] = dataLobes
             if not os.path.isfile(self.outputFolder + '/LobeParameters.csv'):
-                self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False)
+                self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False, sep=';', decimal=',')
             else:
-                self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False, header=False)
-        self.create_visual_output(key, visGraph, cellContour, cellJunctions, lobes, necks, correlatedJunctions, pos)
+                self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False, header=False, sep=';', decimal=',')
+        if self.plotLobeOutput == 1:
+            self.create_visual_output(key, visGraph, cellContour, cellJunctions, lobes, necks, pos)
 
-    def calculate_protrusion_depth_and_width_for(self, key, visGraph, cellContour, cellJunctions):
-        extractionDictForTriWayJunction = {"cellLabel":key, "labelledImage":self.labeledImage}
-        protrusionCalculator = CellProtrusionPropertyCalculator(visGraph, allTriWayJunctions=cellJunctions,
-                                                    contour=cellContour,
-                                                    extractionDictForTriWayJunction=extractionDictForTriWayJunction)
+    def calculate_lobe_and_neck_properties_roi(self, key, visGraph, cellContour, lobes, necks, resolution):
+        """
+        calculate the neck width and lobe length for a selected pavement cell and create a graphic output for lobe and neck positions
+        """
+        pos = nx.get_node_attributes(visGraph, 'pos')
+        for index in range(len(necks)):
+            if index == len(necks) - 1:
+                neck1, neck2 = necks[index], necks[0]
+                nodes = np.append(np.arange(neck1, visGraph.number_of_nodes(), 1), np.arange(0, neck2, 1))
+                lobe = self.find_lobe_between_necks(lobes, nodes)
+            else:
+                neck1, neck2 = necks[index], necks[index + 1]
+                nodes = np.arange(neck1, neck2 + 1, 1)
+                lobe = self.find_lobe_between_necks(lobes, nodes)
+            neckwidth = euclidean(pos[neck1], pos[neck2])
+            if len(lobe) == 0:
+                dataLobes = [key, 'no lobe found', None, None, neck1, neck2, None, neckwidth * resolution]
+            elif len(lobe) > 2:
+                for matchedLobe in lobe:
+                    lobelength = self.calculate_lobe_length(neck1, neck2, matchedLobe, pos)
+                    dataLobes = [key, matchedLobe, pos[matchedLobe][0], pos[matchedLobe][1], neck1, neck2, lobelength * resolution, neckwidth * resolution]
+            else:
+                lobelength = self.calculate_lobe_length(neck1, neck2, lobe[0], pos)
+                dataLobes = [key, lobe[0], pos[lobe[0]][0], pos[lobe[0]][1], neck1, neck2, lobelength * resolution, neckwidth * resolution]
+            self.lobeParameters.loc[0] = dataLobes
+            if not os.path.isfile(self.outputFolder + '/LobeParameters.csv'):
+                self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False, sep=';', decimal=',')
+            else:
+                self.lobeParameters.to_csv(self.outputFolder + '/LobeParameters.csv', mode='a', index=False, header=False, sep=';', decimal=',')
+        if self.plotLobeOutput == 1:
+            self.create_visual_output_roi(key, visGraph, cellContour, lobes, necks, pos)
+
+    def calculate_protrusion_depth_and_width(self, key, visGraph, cellContour, cellJunctions):
+        """
+        calculate the protrusion depth and width of cells
+        """
+        extractionDictForTriWayJunction = {"cellLabel": key, "labeledImage": self.labeledImage}
+        protrusionCalculator = CellProtrusionPropertyCalculator(visGraph, cellJunctions, cellContour, extractionDictForTriWayJunction)
         protrusionDepthOfCell = protrusionCalculator.GetProtrusionDepths()
         protrusionWidthOfCell = protrusionCalculator.GetProtrusionWidthAtHalfHeight()
-        return protrusionDepthOfCell, protrusionWidthOfCell
+        return(protrusionDepthOfCell, protrusionWidthOfCell)
 
     def find_lobe_between_necks(self, lobes, nodes):
         """
@@ -1030,7 +1236,7 @@ class VisGraph:
         lobeLength = euclidean(posL, (basePointX, basePointY))
         return(lobeLength)
 
-    def create_visual_output(self, key, visGraph, contour, junctions, lobes, necks, correlatedJunctions, pos):
+    def create_visual_output(self, key, visGraph, contour, junctions, lobes, necks, pos):
         """
         create a visual output for the positions of detected lobes, necks and tri-cellular junctions
         """
@@ -1064,11 +1270,45 @@ class VisGraph:
             ax.add_patch(circ)
             ax.text(posLobe[1] - yminB + 4, posLobe[0] - xminB + 3, lobe, color='#136492', fontsize=7)
         ax.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, -0.4), fancybox=False, shadow=False, ncol=3, fontsize=7, handler_map={matplotlib.patches.Circle: HandlerEllipse()})
-        if os.path.exists(self.outputFolder + '/resultsGraVis'):
-            fig.savefig(self.outputFolder + '/resultsGraVis/Cell' + str(key) + '_detectedFeatures.png', bbox_inches='tight', dpi=300)
+        if os.path.exists(self.outputFolder + '/ResultsLobePositions'):
+            fig.savefig(self.outputFolder + '/ResultsLobePositions/Cell' + str(key) + '_detectedFeatures.png', bbox_inches='tight', dpi=300)
         else:
             fig.savefig(self.outputFolder + '/Cell' + str(key) + '_detectedFeatures.png', bbox_inches='tight', dpi=300)
 
+    def create_visual_output_roi(self, key, visGraph, contour, lobes, necks, pos):
+        """
+        create a visual output for the positions of detected lobes, necks and tri-cellular junctions
+        """
+        xmin, xmax, ymin, ymax = np.min(contour[:, 0]), np.max(contour[:, 0]), np.min(contour[:, 1]), np.max(contour[:, 1])
+        xminB, yminB = bounds(xmin, 0, xmin - 10), bounds(ymin, 0, ymin - 10)
+        contourImage = np.zeros(((xmax + 10) - xminB, (ymax + 10) - yminB))
+        for x, y in contour:
+            contourImage[x - xminB, y - yminB] = 1
+
+        legend_elements = [matplotlib.patches.Circle(([0], [0]), radius=3, ec='#56b4e9', fc='None', lw=2, label='Lobe'),
+                       matplotlib.patches.Circle(([0], [0]), radius=3, ec='#e69f00', fc='None', lw=2, label='Neck')]
+
+        fig, ax = plt.subplots(1, 1)
+        plt.imshow(contourImage, cmap='gray_r', interpolation='None')
+        ax.tick_params(axis='both', which='both', top='off', right='off')
+        ax.set_xlabel('Pixel')
+        ax.set_ylabel('Pixel')
+        ax.set_title('Cell ' + str(key))
+        for neck in necks:
+            posNeck = pos[neck]
+            circ = plt.Circle((posNeck[1] - yminB, posNeck[0] - xminB), radius=3, ec='#e69f00', fc='None', lw=2)
+            ax.add_patch(circ)
+            ax.text(posNeck[1] - yminB + 4, posNeck[0] - xminB + 3, neck, color='#af7900', fontsize=7)
+        for lobe in lobes:
+            posLobe = pos[lobe]
+            circ = plt.Circle((posLobe[1] - yminB, posLobe[0] - xminB), radius=3, ec='#56b4e9', fc='None', lw=2)
+            ax.add_patch(circ)
+            ax.text(posLobe[1] - yminB + 4, posLobe[0] - xminB + 3, lobe, color='#136492', fontsize=7)
+        ax.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, -0.4), fancybox=False, shadow=False, ncol=3, fontsize=7, handler_map={matplotlib.patches.Circle: HandlerEllipse()})
+        if os.path.exists(self.outputFolder + '/Results'):
+            fig.savefig(self.outputFolder + '/Results/Cell_' + str(key) + '_detectedFeatures.png', bbox_inches='tight', dpi=300)
+        else:
+            fig.savefig(self.outputFolder + '/Cell_' + str(key) + '_detectedFeatures.png', bbox_inches='tight', dpi=300)
 
     def compute_graph_complexity(self, visGraph):
         """
@@ -1078,11 +1318,11 @@ class VisGraph:
         delta = visGraph.number_of_edges() / edgesCompleteGraph
         return(delta)
 
-class CellProtrusionPropertyCalculator (object):
+class CellProtrusionPropertyCalculator(object):
 
     def __init__(self, visGraph, triWayJunctionPos, cellContour, extractionDictForTriWayJunction=False):
         self.visGraph = visGraph # visibility graph (networkx graph) with 'pos' and 'LobeNeckNone' node attributes
-        self.triWayJunctionPos = triWayJunctionPos # 2D array with each row being the coordinates of one tri-way junction in an ordered fashion
+        self.triWayJunctionPos = np.asarray(triWayJunctionPos) # 2D array with each row being the coordinates of one tri-way junction in an ordered fashion
         self.cellContour = cellContour
         self.extractionDictForTriWayJunction = extractionDictForTriWayJunction
         self.calcProtrusionDepthAndWidth()
@@ -1091,73 +1331,75 @@ class CellProtrusionPropertyCalculator (object):
         self.orderedContour = self.extractOrderedContour()
         self.cellOutlineRing = self.createLinearRingFromContour()
         if self.extractionDictForTriWayJunction:
-            labelledImage = self.extractionDictForTriWayJunction["labelledImage"]
+            labeledImage = self.extractionDictForTriWayJunction["labeledImage"]
             cellLabel = self.extractionDictForTriWayJunction["cellLabel"]
-            self.triWayJunctionPos = self.extractTriWayJunctions(cellLabel, self.visGraph, self.triWayJunctionPos, labelledImage)
+            self.triWayJunctionPos = self.extractTriWayJunctions(cellLabel, self.visGraph, self.triWayJunctionPos, labeledImage)
         self.lobePos, self.selectedLobeKeys = self.extractPositionOfFromVisibilityGraph(undulationType="Lobe")
-        self.protrusionDepths = self.calcShortestDistanceOfPointsToPolygon(self.triWayJunctionPos, self.lobePos)
-        self.protrusionWidthAtHalfHeight = self.calcWidthAtHalfHeightFor(self.triWayJunctionPos, self.protrusionDepths)
+        triWayJunctionPosList = [(x, y) for x, y in self.triWayJunctionPos]
+        self.uniqueJunctions = len(list(set(triWayJunctionPosList)))
+        self.protrusionDepths = self.calcShortestDistanceOfPointsToPolygon(self.triWayJunctionPos, self.lobePos, self.uniqueJunctions)
+        self.protrusionWidthAtHalfHeight = self.calcWidthAtHalfHeightFor(self.triWayJunctionPos, self.protrusionDepths, self.uniqueJunctions)
 
     def extractOrderedContour(self):
         orderedContour = self.cellContour
-        if np.any(orderedContour[0,:] != orderedContour[-1,:]):
-            orderedContour = np.concatenate([orderedContour[:,:], orderedContour[0,:].reshape(1,2)])
-        return orderedContour
+        if np.any(orderedContour[0, :] != orderedContour[-1, :]):
+            orderedContour = np.concatenate([orderedContour[:, :], orderedContour[0, :].reshape(1, 2)])
+        return(orderedContour)
 
     def createLinearRingFromContour(self):
         cellOutlineRing = self.createLinearRingFromCoordinates(self.orderedContour)
         assert cellOutlineRing.is_valid, "The cell contour of cell label is not valid. Contour: {}".format(self.orderedContour)
-        return cellOutlineRing
+        return(cellOutlineRing)
 
     def createLinearRingFromCoordinates(self, coordinates):
-        return LinearRing(asLineString(coordinates))
+        return(shapely.geometry.LinearRing(shapely.geometry.asLineString(coordinates)))
 
-    def extractTriWayJunctions(self, cellLabel, visGraph, allTriWayJunctions, labelledImage):
-        cellLabelInLabelledImage = cellLabel+1
-        unordedJunctions = self.extractJunctionOfCell(allTriWayJunctions, cellLabelInLabelledImage, labelledImage)
-        unordedJunctions = self.clipTriWayJunctionToCellOutline(self.cellOutlineRing, unordedJunctions)
-        orderedTriWayJunctions = self.orderJunctions(unordedJunctions, self.orderedContour)
-        return orderedTriWayJunctions
+    def extractTriWayJunctions(self, cellLabel, visGraph, allTriWayJunctions, labeledImage):
+        cellLabelInLabeledImage = cellLabel + 1
+        unorderedJunctions = self.extractJunctionOfCell(allTriWayJunctions, cellLabelInLabeledImage, labeledImage)
+        unorderedJunctions = self.clipTriWayJunctionToCellOutline(self.cellOutlineRing, unorderedJunctions)
+        orderedTriWayJunctions = self.orderJunctions(unorderedJunctions, self.orderedContour)
+        return(orderedTriWayJunctions)
 
-    def extractJunctionOfCell(self, triWayJunctions, cellLabel, labelledImage):
-        cellImage = np.zeros(labelledImage.shape)
-        cellImage[labelledImage == cellLabel] = 1
-        cellImage = skimage.morphology.dilation(cellImage, np.ones((8,8)))
-        idx = np.where(cellImage[triWayJunctions[:,0], triWayJunctions[:,1]] == 1)[0]
-        return triWayJunctions[idx,:].copy()
+    def extractJunctionOfCell(self, triWayJunctions, cellLabel, labeledImage):
+        cellImage = np.zeros(labeledImage.shape)
+        cellImage[labeledImage == cellLabel] = 1
+        cellImage = skimage.morphology.dilation(cellImage, np.ones((8, 8)))
+        idx = np.where(cellImage[triWayJunctions[:, 0], triWayJunctions[:, 1]] == 1)[0]
+        return(triWayJunctions[idx, :].copy())
 
     def clipTriWayJunctionToCellOutline(self, cellOutlineRing, junctionCoordinates):
         for i in range(len(junctionCoordinates)):
-            currentTriWayJunction = Point(junctionCoordinates[i])
+            currentTriWayJunction = shapely.geometry.Point(junctionCoordinates[i])
             correctedTriWayJunction = cellOutlineRing.interpolate(cellOutlineRing.project(currentTriWayJunction))
             if not self.isCorrectedTriWayJunctionOnOutline(np.asarray(list(cellOutlineRing.coords)), junctionCoordinates[i]):
                 junctionCoordinates[i] = self.correctToOutline(np.asarray(list(cellOutlineRing.coords)), list(correctedTriWayJunction.coords))
             else:
                 junctionCoordinates[i] = list(correctedTriWayJunction.coords)[0]
-        return junctionCoordinates
+        return(junctionCoordinates)
 
     def isCorrectedTriWayJunctionOnOutline(self, cellOutline, junction):
-        return np.any((cellOutline[:, 0] == junction[0]) & (cellOutline[:, 1] == junction[1]))
+        return(np.any((cellOutline[:, 0] == junction[0]) & (cellOutline[:, 1] == junction[1])))
 
     def correctToOutline(self, cellOutline, junction):
         xyDistances = cellOutline - junction
         bestIdx = np.argmin(np.linalg.norm(xyDistances, axis=1))
-        return cellOutline[bestIdx,:]
+        return(cellOutline[bestIdx, :])
 
-    def orderJunctions(self, unordedJunctions, orderedContour, threshold=5):
-        ordedJunctions = []
-        if unordedJunctions.shape[0] < 3:
-            return unordedJunctions
+    def orderJunctions(self, unorderedJunctions, orderedContour, threshold=5):
+        orderedJunctions = []
+        if unorderedJunctions.shape[0] < 3:
+            return unorderedJunctions
         for xyCoor in orderedContour:
-            distances = np.linalg.norm(unordedJunctions-xyCoor, axis=1)
+            distances = np.linalg.norm(unorderedJunctions - xyCoor, axis=1)
             idx = np.where(distances < threshold)[0]
             if len(idx) == 1:
-                ordedJunctions.append(unordedJunctions[idx,:].tolist()[0])
-                unordedJunctions = np.delete(unordedJunctions, idx, axis=0)
-                if len(unordedJunctions) == 0:
+                orderedJunctions.append(unorderedJunctions[idx, :].tolist()[0])
+                unorderedJunctions = np.delete(unorderedJunctions, idx, axis=0)
+                if len(unorderedJunctions) == 0:
                     break
-        ordedJunctions = np.asarray(ordedJunctions)
-        return ordedJunctions
+        orderedJunctions = np.asarray(orderedJunctions)
+        return(orderedJunctions)
 
     def extractPositionOfFromVisibilityGraph(self, undulationType="Lobe"):
         selectedNodeKeys = []
@@ -1169,82 +1411,94 @@ class CellProtrusionPropertyCalculator (object):
                 coordinates.append(allCoordinates[nodeKey])
                 selectedNodeKeys.append(nodeKey)
         coordinates = np.asarray(coordinates)
-        return coordinates, selectedNodeKeys
+        return(coordinates, selectedNodeKeys)
 
-    def calcShortestDistanceOfPointsToPolygon(self, polygonVertices, points):
-        cellPolygon = asPolygon(polygonVertices)
-        cellPolygonRing = self.createLinearRingFromCoordinates(polygonVertices)
-        nrOfUndulations = points.shape[0]
-        undulationDepths = np.zeros(nrOfUndulations)
-        for i in range(nrOfUndulations):
-            undulationPoint = Point(points[i, :])
-            isInsideCell = cellPolygon.contains(undulationPoint)
-            undulationDepths[i] = cellPolygonRing.distance(undulationPoint)
-            if isInsideCell:
-                undulationDepths[i] *= -1
-        return undulationDepths
+    def calcShortestDistanceOfPointsToPolygon(self, polygonVertices, points, uniqueJunctions):
+        if uniqueJunctions > 2:
+            cellPolygon = shapely.geometry.asPolygon(polygonVertices)
+            cellPolygonRing = self.createLinearRingFromCoordinates(polygonVertices)
+            nrOfUndulations = points.shape[0]
+            undulationDepths = np.zeros(nrOfUndulations)
+            for i in range(nrOfUndulations):
+                undulationPoint = shapely.geometry.Point(points[i, :])
+                isInsideCell = cellPolygon.contains(undulationPoint)
+                undulationDepths[i] = cellPolygonRing.distance(undulationPoint)
+                if isInsideCell:
+                    undulationDepths[i] *= -1
+        else:
+            undulationDepths = [np.NaN] * len(points)
+        return(undulationDepths)
 
-    def calcWidthAtHalfHeightFor(self, polygonVertices, depthOfCell):
+    def calcWidthAtHalfHeightFor(self, polygonVertices, depthOfCell, uniqueJunctions):
         nodeCoordinates = nx.get_node_attributes(self.visGraph, 'pos')
-        cellPolygonRing = self.createLinearRingFromCoordinates(polygonVertices)
-        widths = np.zeros(len(self.selectedLobeKeys))
-        for i in range(len(self.selectedLobeKeys)):
-            currentLobeNodeKey = self.selectedLobeKeys[i]
-            undulationPoint = Point(nodeCoordinates[currentLobeNodeKey])
-            if depthOfCell[i] != 0:
-                widths[i] = self.calcWidthAtHalfHeight(undulationPoint, cellPolygonRing)
-            else:
-                widths[i] = np.NaN
-        return widths
+        if uniqueJunctions > 2:
+            cellPolygonRing = self.createLinearRingFromCoordinates(polygonVertices)
+            widths = np.zeros(len(self.selectedLobeKeys))
+            for i in range(len(self.selectedLobeKeys)):
+                currentLobeNodeKey = self.selectedLobeKeys[i]
+                undulationPoint = shapely.geometry.Point(nodeCoordinates[currentLobeNodeKey])
+                if depthOfCell[i] != 0:
+                    widths[i] = self.calcWidthAtHalfHeight(undulationPoint, cellPolygonRing)
+                else:
+                    widths[i] = np.NaN
+        else:
+            widths = [np.NaN] * len(self.selectedLobeKeys)
+        return(widths)
 
     def calcWidthAtHalfHeight(self, undulationPoint, cellPolygonRing,
                               lengthOfParallelSegment=400, recursiveCallIncreasingSegmentLength=False,
                               recursiveCallNr=0):
         auxiliaryLineAtHalfHeight = self.createParallelToPolygonLineAtHalfHeight(undulationPoint,
                                             cellPolygonRing, lengthOfParallelSegment=lengthOfParallelSegment)
-        intersects = self.cellOutlineRing.intersection(auxiliaryLineAtHalfHeight)
-        intersects = self.correctPotentialLineString(intersects, undulationPoint)
-        widthAtHalfHeight = np.NaN
-        if type(intersects) != type(Point()):
-            if len(intersects) > 2:
-                lotOfUDToPolygon = LineString([undulationPoint, cellPolygonRing.interpolate(cellPolygonRing.project(undulationPoint))])
-                intersects = self.reduceToImportantentIntersections(intersects, lotOfUDToPolygon)
-                undulationWidthAtHalfHeightLine = LineString(intersects)
-                widthAtHalfHeight = undulationWidthAtHalfHeightLine.length
-            if len(intersects) == 2:
-                undulationWidthAtHalfHeightLine = LineString(intersects)
-                widthAtHalfHeight = undulationWidthAtHalfHeightLine.length
-        return widthAtHalfHeight
+        if auxiliaryLineAtHalfHeight != None:
+            intersects = self.cellOutlineRing.intersection(auxiliaryLineAtHalfHeight)
+            intersects = self.correctPotentialLineString(intersects, undulationPoint)
+            widthAtHalfHeight = np.NaN
+            if type(intersects) != type(shapely.geometry.Point()):
+                if len(intersects) > 2:
+                    lotOfUDToPolygon = shapely.geometry.LineString([undulationPoint, cellPolygonRing.interpolate(cellPolygonRing.project(undulationPoint))])
+                    intersects = self.reduceToImportantentIntersections(intersects, lotOfUDToPolygon)
+                    undulationWidthAtHalfHeightLine = shapely.geometry.LineString(intersects)
+                    widthAtHalfHeight = undulationWidthAtHalfHeightLine.length
+                if len(intersects) == 2:
+                    undulationWidthAtHalfHeightLine = shapely.geometry.LineString(intersects)
+                    widthAtHalfHeight = undulationWidthAtHalfHeightLine.length
+        else:
+            widthAtHalfHeight = np.NaN
+        return(widthAtHalfHeight)
 
     def createParallelToPolygonLineAtHalfHeight(self, undulationPoint, cellPolygonRing,
                                                 lengthOfParallelSegment=200):
         halfUDPoint = self.calcPointAtHalfUndulationDepth(undulationPoint, cellPolygonRing)
         parallelSegmentVector = self.calcVectorOfClosestPolygonSegment(undulationPoint, cellPolygonRing)
-        factorForVector = lengthOfParallelSegment / (2 * np.linalg.norm(parallelSegmentVector))
-        startPointOfParallelSegemnt = np.asarray(halfUDPoint.coords)[0] + factorForVector * parallelSegmentVector
-        endPointOfParallelSegemnt = np.asarray(halfUDPoint.coords)[0] - factorForVector * parallelSegmentVector
-        auxiliaryLineAtHalfHeight = LineString([startPointOfParallelSegemnt, endPointOfParallelSegemnt])
-        return auxiliaryLineAtHalfHeight
+        if np.linalg.norm(parallelSegmentVector) != 0:
+            factorForVector = lengthOfParallelSegment / (2 * np.linalg.norm(parallelSegmentVector))
+            startPointOfParallelSegment = np.asarray(halfUDPoint.coords)[0] + factorForVector * parallelSegmentVector
+            endPointOfParallelSegment = np.asarray(halfUDPoint.coords)[0] - factorForVector * parallelSegmentVector
+            auxiliaryLineAtHalfHeight = shapely.geometry.LineString([startPointOfParallelSegment, endPointOfParallelSegment])
+            return(auxiliaryLineAtHalfHeight)
+        else:
+            return(None)
 
     def calcPointAtHalfUndulationDepth(self, undulationPoint, cellPolygonRing):
         pointOnRing = cellPolygonRing.interpolate(cellPolygonRing.project(undulationPoint))
-        undulationDepthLine = LineString([undulationPoint, pointOnRing])
+        undulationDepthLine = shapely.geometry.LineString([undulationPoint, pointOnRing])
         distance = undulationDepthLine.length
-        halfUDPoint = undulationDepthLine.interpolate(distance/2)
-        return halfUDPoint
+        halfUDPoint = undulationDepthLine.interpolate(distance / 2)
+        return(halfUDPoint)
 
     def calcVectorOfClosestPolygonSegment(self, undulationPoint, cellPolygonRing):
         closestPolygonSegment = self.findClosestLineSegment(cellPolygonRing, undulationPoint)
         startOfSegement, endOfSegment = list(closestPolygonSegment.coords)
         closestSegmentVector = np.asarray(endOfSegment) - np.asarray(startOfSegement)
-        return closestSegmentVector
+        return(closestSegmentVector)
 
     def findClosestLineSegment(self, linearRing, point):
         oldPoint = None
         splitRingSegments = []
         for newPoint in linearRing.coords:
             if oldPoint:
-                splitRingSegments.append(LineString([newPoint, oldPoint]))
+                splitRingSegments.append(shapely.geometry.LineString([newPoint, oldPoint]))
             oldPoint = newPoint
         argMin = None
         minDistance = np.inf
@@ -1253,59 +1507,63 @@ class CellProtrusionPropertyCalculator (object):
             if distance < minDistance:
                 minDistance = distance
                 argMin = i
-        return splitRingSegments[argMin]
+        return(splitRingSegments[argMin])
 
     def correctPotentialLineString(self, potentialLineStrings, referencePoint):
-        if type(potentialLineStrings) != type(Point()):
-            if type(potentialLineStrings) == type(LineString()):
+        if type(potentialLineStrings) != type(shapely.geometry.Point()):
+            if type(potentialLineStrings) == type(shapely.geometry.LineString()):
                 potentialLineStrings = list(potentialLineStrings.coords)
             else:
                 potentialLineStrings = list(potentialLineStrings)
                 containsLine = False
                 for i in range(len(potentialLineStrings)):
-                    if type(potentialLineStrings[i]) == type(LineString()):
+                    if type(potentialLineStrings[i]) == type(shapely.geometry.LineString()):
                         minDistances = np.inf
                         closestPointToReferencePoint = None
                         for point in potentialLineStrings[i].coords:
-                            point = Point(point)
+                            point = shapely.geometry.Point(point)
                             d = referencePoint.distance(point)
                             if d < minDistances:
                                 closestPointToReferencePoint = point
                         potentialLineStrings[i] = closestPointToReferencePoint
-            potentialLineStrings = MultiPoint(potentialLineStrings)
-        return potentialLineStrings
+            potentialLineStrings = shapely.geometry.MultiPoint(potentialLineStrings)
+        return(potentialLineStrings)
 
     def reduceToImportantentIntersections(self, intersects, lotOfUDToPolygon):
         intersectionCoordinates = list(intersects)
         direction = 0
-        interlinkedIntersects = LineString(intersectionCoordinates)
+        interlinkedIntersects = shapely.geometry.LineString(intersectionCoordinates)
         directionChecked = 0
         while interlinkedIntersects.intersects(lotOfUDToPolygon) or directionChecked < 2:
             if len(intersectionCoordinates) == 2:
                 break
             removedIntersection = intersectionCoordinates.pop(direction)
-            interlinkedIntersects = LineString(intersectionCoordinates)
+            interlinkedIntersects = shapely.geometry.LineString(intersectionCoordinates)
             if not interlinkedIntersects.intersects(lotOfUDToPolygon):
                 intersectionCoordinates.insert(direction, removedIntersection)
                 direction = -1
                 directionChecked += 1
-        return intersectionCoordinates
+        return(intersectionCoordinates)
 
     def GetProtrusionDepths(self):
-        return self.protrusionDepths
+        return(self.protrusionDepths)
 
     def GetProtrusionWidthAtHalfHeight(self):
-        return self.protrusionWidthAtHalfHeight
+        return(self.protrusionWidthAtHalfHeight)
 
 class VisGraphOther:
 
-    def __init__(self, selectedImage, resolution, outputFolder, inputType, fileList):
+    def __init__(self, selectedImage, resolution, outputFolder, inputType, fileList, roiInput):
         self.selectedImage = selectedImage
         self.outputFolder = outputFolder
         self.resolution = float(resolution)
         self.inputType = inputType
         self.fileList = fileList
-        self.shapeResultsTable = pd.DataFrame(columns=['File', 'LabeledImage', 'GraphNumber', '#Nodes', '#Edges', 'Complexity'])
+        self.roiInput = roiInput
+        if self.roiInput == False:
+            self.shapeResultsTable = pd.DataFrame(columns=['File', 'LabeledImage', 'GraphNumber', '#Nodes', '#Edges', 'Complexity'])
+        else:
+            self.shapeResultsTable = pd.DataFrame(columns=['File', '#Nodes', '#Edges', 'Complexity'])
         if os.path.isfile(self.outputFolder + '/visibilityGraphs.gpickle'):
             os.remove(self.outputFolder + '/visibilityGraphs.gpickle')
         if os.path.isfile(self.outputFolder + '/cellContours.gpickle'):
@@ -1314,31 +1572,47 @@ class VisGraphOther:
             os.remove(self.outputFolder + '/shapeResultsTable.csv')
 
         if self.inputType == 'image':
-            show_Message("...Load binary image.")
-            self.labeledImage, self.labels = self.label_binary_image(self.selectedImage)
-            show_Message("...Create visibility graphs:")
-            self.visibilityGraphsOther = self.visibility_graphs_other(self.labeledImage, self.labels, self.resolution)
-            for graph in self.visibilityGraphsOther.keys():
-                self.add_data_to_table(self.visibilityGraphsOther[graph], self.selectedImage, graph, 'LabeledShapes.png')
-            self.plot_labeled_image(self.labeledImage, self.outputFolder, self.labels, 'image', 1)
+            if self.roiInput == False:
+                self.labeledImage, self.labels = self.label_binary_image(self.selectedImage)
+                show_Message("...Create visibility graphs.")
+                self.visibilityGraphsOther = self.visibility_graphs_other(self.labeledImage, self.labels, self.resolution, self.outputFolder)
+                for graph in self.visibilityGraphsOther.keys():
+                    self.add_data_to_table(self.visibilityGraphsOther[graph], self.selectedImage, graph, 'LabeledShapes.png', self.outputFolder)
+                self.plot_labeled_image(self.labeledImage, self.outputFolder, self.labels, 'image', 1)
+            else:
+                self.keyName, self.cellContour = self.read_roi_file(self.selectedImage)
+                show_Message("...Create visibility graph.")
+                self.visibilityGraphsOther = self.create_visibility_graph_roi(self.cellContour, self.resolution)
+                self.save_contour_and_graph_roi(self.visibilityGraphsOther, self.cellContour, self.outputFolder)
+                self.add_data_to_table_roi(self.visibilityGraphsOther, self.keyName, self.outputFolder)
         else:
-            graphIndex = 1
-            self.visibilityGraphsOther = {}
-            for fileIndex, file in enumerate(self.fileList):
-                show_Message("...Load binary image " + str(fileIndex+1) + " of " + str(len(self.fileList)))
-                self.labeledImage, self.labels = self.label_binary_image(file)
-                show_Message("...Create visibility graphs:")
-                self.visibilityGraph = self.visibility_graphs_other(self.labeledImage, self.labels, self.resolution)
-                labeledFile = self.plot_labeled_image(self.labeledImage, self.outputFolder, self.labels, 'folder', graphIndex)
-                if len(self.visibilityGraph) == 1:
-                    self.visibilityGraphsOther[graphIndex] = list(self.visibilityGraph.values())[0]
-                    self.add_data_to_table(list(self.visibilityGraph.values())[0], file, graphIndex, labeledFile)
-                    graphIndex += 1
-                else:
-                    for graph in self.visibilityGraph.keys():
-                        self.visibilityGraphsOther[graphIndex] = self.visibilityGraph[graph]
-                        self.add_data_to_table(self.visibilityGraph[graph], file, graphIndex, labeledFile)
+            if self.roiInput == False:
+                graphIndex = 1
+                self.visibilityGraphsOther = {}
+                for fileIndex, file in enumerate(self.fileList):
+                    self.labeledImage, self.labels = self.label_binary_image(file)
+                    show_Message("...Create visibility graph" + str(fileIndex + 1) + " of " + str(len(self.fileList)))
+                    self.visibilityGraph = self.visibility_graphs_other(self.labeledImage, self.labels, self.resolution, self.outputFolder)
+                    labeledFile = self.plot_labeled_image(self.labeledImage, self.outputFolder, self.labels, 'folder', graphIndex)
+                    if len(self.visibilityGraph) == 1:
+                        self.visibilityGraphsOther[graphIndex] = list(self.visibilityGraph.values())[0]
+                        self.add_data_to_table(list(self.visibilityGraph.values())[0], file, graphIndex, labeledFile, self.outputFolder)
                         graphIndex += 1
+                    else:
+                        for graph in self.visibilityGraph.keys():
+                            self.visibilityGraphsOther[graphIndex] = self.visibilityGraph[graph]
+                            self.add_data_to_table(self.visibilityGraph[graph], file, graphIndex, labeledFile, self.outputFolder)
+                            graphIndex += 1
+            else:
+                for fileIndex, file in enumerate(self.fileList):
+                    self.keyName, self.cellContour = self.read_roi_file(file)
+                    show_Message("...Create visibility graph " + str(fileIndex + 1) + " of " + str(len(self.fileList)))
+                    self.visibilityGraphsOther = self.create_visibility_graph_roi(self.cellContour, self.resolution)
+                    if len(self.visibilityGraphsOther.nodes()) > 0:
+                        self.save_contour_and_graph_roi(self.visibilityGraphsOther, self.cellContour, self.outputFolder)
+                        self.add_data_to_table_roi(self.visibilityGraphsOther, self.keyName, self.outputFolder)
+                    else:
+                        show_Message("\nWith the resolution you provided no visibility graph could be created for " + file)
         show_Message("\nGraVis is done!")
 
     def label_binary_image(self, selectedImage):
@@ -1359,7 +1633,35 @@ class VisGraphOther:
         else:
             messagebox.showinfo("Error", "The input image is not binary.")
 
-    def visibility_graphs_other(self, labeledImage, labels, resolution):
+    def read_roi_file(self, filename):
+        """
+        read roi file and return corresponding x/y coordinates
+        """
+        fileType = filename.split('/')[-1].split('.')[-1]
+        if fileType == 'roi' or fileType == 'ROI':
+            keyName = filename.split('/')[-1].split('.')[0]
+            roiFile = read_roi.read_roi_file(filename)
+            xCoordinates = roiFile[keyName]['x']
+            yCoordinates = roiFile[keyName]['y']
+            cellContour = np.array(list(zip(xCoordinates, yCoordinates)))
+            return(keyName, cellContour)
+        else:
+            messagebox.showinfo("Warning", "The folder you chose, inludes ROI files and other file types. Please remove files which are not ROI files for the analysis.")
+
+    def save_contour_and_graph_roi(self, visGraph, cellContour, outputFolder):
+        """
+        save the visibility graph and cell contour extracted from ROI file
+        """
+        if len(cellContour) != 0:
+            cellContoursPickle = open(outputFolder + '/cellContours.gpickle', 'ab')
+            pickle.dump(cellContour, cellContoursPickle)
+            cellContoursPickle.close()
+        if len(visGraph.nodes()) != 0:
+            visGraphsPickle = open(outputFolder + '/visibilityGraphs.gpickle', 'ab')
+            pickle.dump(visGraph, visGraphsPickle)
+            visGraphsPickle.close()
+
+    def visibility_graphs_other(self, labeledImage, labels, resolution, outputFolder):
         """
         create a visibility graph for all cells
         """
@@ -1370,32 +1672,44 @@ class VisGraphOther:
             visGraph, cellContour = self.create_visibility_graph(labeledImage, label, resolution)
             if visGraph != None:
                 visGraphsAll[label] = visGraph
-                visGraphsOtherPickle = open(self.outputFolder + '/visibilityGraphs.gpickle', 'ab')
+                visGraphsOtherPickle = open(outputFolder + '/visibilityGraphs.gpickle', 'ab')
                 pickle.dump(visGraph, visGraphsOtherPickle)
                 visGraphsOtherPickle.close()
-                cellContoursOtherPickle = open(self.outputFolder + '/cellContours.gpickle', 'ab')
+                cellContoursOtherPickle = open(outputFolder + '/cellContours.gpickle', 'ab')
                 pickle.dump(cellContour, cellContoursOtherPickle)
                 cellContoursOtherPickle.close()
         return(visGraphsAll)
 
     def create_visibility_graph(self, labeledImage, label, resolution):
         """
-        create visibilit graph from cell contour
+        create visibility graph from cell contour
         """
         visGraph = nx.Graph()
-        cases = ['FFFF0F212','0FFF0F212','1FFF0F212','F0FF0F212','00FF0F212','10FF0F212','F1FF0F212']
         contourImage, cellContourOrdered = self.extract_cell_contour(label, labeledImage)
         if len(cellContourOrdered) != 0:
             pixelsOnContour = interpolate_contour_pixels(cellContourOrdered, resolution)
             if len(pixelsOnContour) != 0 and len(pixelsOnContour) >= 4:
                 for key in pixelsOnContour:
                     visGraph.add_node(key, pos=(pixelsOnContour[key][0], pixelsOnContour[key][1]))
-                visGraph = self.add_edges_to_visGraph(pixelsOnContour, visGraph, cases)
+                visGraph = self.add_edges_to_visGraph(pixelsOnContour, visGraph)
             else:
                 visGraph, cellContourOrdered = None, None
         else:
             visGraph, cellContourOrdered = None, None
         return(visGraph, cellContourOrdered)
+
+    def create_visibility_graph_roi(self, cellContour, resolution):
+        """
+        create visibility graph from cell contour
+        """
+        visGraph = nx.Graph()
+        if len(cellContour) != 0:
+            pixelsOnContour = interpolate_contour_pixels(cellContour, resolution)
+            if len(pixelsOnContour) != 0 and len(pixelsOnContour) >= 4:
+                for key in pixelsOnContour:
+                    visGraph.add_node(key, pos=(pixelsOnContour[key][0], pixelsOnContour[key][1]))
+                visGraph = self.add_edges_to_visGraph(pixelsOnContour, visGraph)
+        return(visGraph)
 
     def extract_cell_contour(self, label, labeledImage):
         """
@@ -1414,10 +1728,11 @@ class VisGraphOther:
             contourImage[xPos, yPos] = 1
         return(contourImage, cellContourOrdered)
 
-    def add_edges_to_visGraph(self, pixelsOnContour, visGraph, cases):
+    def add_edges_to_visGraph(self, pixelsOnContour, visGraph):
         """
         add edge to visGraph if the edge between two nodes lies inside the cell (concave)
         """
+        cases = ['FFFF0F212','0FFF0F212','1FFF0F212','F0FF0F212','00FF0F212','10FF0F212','F1FF0F212']
         Polygon = shapely.geometry.Polygon([[pixelsOnContour[key][1], pixelsOnContour[key][0]] for key in pixelsOnContour])
         Boundary = shapely.geometry.LineString(list(Polygon.exterior.coords))
         combs = itertools.combinations(range(len(pixelsOnContour)), 2)
@@ -1434,7 +1749,7 @@ class VisGraphOther:
                     visGraph.add_edge(node1, node2, length=euclidean(pixelsOnContour[node1], pixelsOnContour[node2]))
         return(visGraph)
 
-    def add_data_to_table(self, visGraph, file, index, labeledFile):
+    def add_data_to_table(self, visGraph, file, index, labeledFile, outputFolder):
         """
         summarize all results in a table
         """
@@ -1442,10 +1757,22 @@ class VisGraphOther:
         sigma = self.compute_graph_complexity(visGraph)
         dataAppend = [fileName, labeledFile, index, visGraph.number_of_nodes(), visGraph.number_of_edges(), sigma]
         self.shapeResultsTable.loc[0] = dataAppend
-        if not os.path.isfile(self.outputFolder + '/ShapeResultsTable.csv'):
-            self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False)
+        if not os.path.isfile(outputFolder + '/ShapeResultsTable.csv'):
+            self.shapeResultsTable.to_csv(outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, sep=';', decimal=',')
         else:
-            self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False)
+            self.shapeResultsTable.to_csv(outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False, sep=';', decimal=',')
+
+    def add_data_to_table_roi(self, visGraph, filename, outputFolder):
+        """
+        summarize all results in a table
+        """
+        sigma = self.compute_graph_complexity(visGraph)
+        dataAppend = [filename, visGraph.number_of_nodes(), visGraph.number_of_edges(), sigma]
+        self.shapeResultsTable.loc[0] = dataAppend
+        if not os.path.isfile(outputFolder + '/ShapeResultsTable.csv'):
+            self.shapeResultsTable.to_csv(outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, sep=';', decimal=',')
+        else:
+            self.shapeResultsTable.to_csv(outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, header=False, sep=';', decimal=',')
 
     def compute_graph_complexity(self, visGraph):
         """
@@ -1540,7 +1867,7 @@ class Comparison:
         if len(self.visibilityGraphsAll) <= 200:
             self.distanceMatrix = self.calculate_distance_matrix(self.visibilityGraphsAll)
             np.save(self.outputFolder + "/distanceMatrix.npy", self.distanceMatrix)
-            self.resultsTable.to_csv(self.outputFolder + "/annotationsDistanceMatrix.csv")
+            self.resultsTable.to_csv(self.outputFolder + "/annotationsDistanceMatrix.csv", index=False, sep=';', decimal=',')
             if self.plotPCA == True:
                 self.plot_PCA(self.distanceMatrix, self.resultsTable)
             if self.plotDendrogram == True:
