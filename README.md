@@ -9,7 +9,7 @@ Please cite the following paper if you use the tool:
 
    Nowak, J., Eng, R.C., Matz, T., Waack, M., Persson, S., Sampathkumar, A. and Nikoloski, Z.
    A network-based framework for shape analysis enables accurate characterization and classification of leaf epidermal cells.
-    *Nature Communications* (accepted).
+    *Nature Communications* 12, 458 (2021).
 
 ## Contents
   - [Requirements](#requirements)
@@ -41,13 +41,18 @@ In the next step, the type of image to be analyzed has to be selected. If paveme
   - both image pre-processing and graph extraction
 
 The image pre-processing pipeline automatically detects noise or artificial edges in the image and remove them. If the pre-processing is not satisfying for the user, some of these steps can be enforced by ticking the corresponding boxes. If the plotting of intermediate steps is selected, the binary and skeletonized images of  PC outlines are saved in the output folder. After completing the pre-processing, the image with the segmented and labeled PCs will be displayed on the right side.
-For the graph extraction the resolution of the image has to be provided. Furthermore, the graph extraction is only working if the selected image(s) were pre-processed beforehand.
+For the graph extraction the resolution of the image has to be provided. Furthermore, the graph extraction is only working if the selected image(s) were pre-processed beforehand or for ROI files.
 
 <img src="/doc/images/GraVisGUI_description_PCs.png" width="600">
 
-If other shapes were selected for the analysis, the user has to provide binary images and has to provide the distance between nodes along the shapes (in pixel/node). The analysis pipeline is started by pressing "Run". The progress of the analysis will be printed in the log on the right side. Depending on the number of detected shapes and the number of input images, the analysis can take from seconds to several minutes to complete. 
+If other shapes were selected for the analysis, the user has to provide binary images or ROI files and has to provide the distance between nodes along the shapes (in pixel/node). The analysis pipeline is started by pressing "Run". The progress of the analysis will be printed in the log on the right side. Depending on the number of detected shapes and the number of input images, the analysis can take from seconds to several minutes to complete. 
 
 <img src="/doc/images/GraVisGUI_description_other.png" width="600">
+
+### Shape Parameters
+The calculated shape features for pavement cells include classic parameters like the cell area, the perimeter and the circularity. Furthermore, we added GraVis-specific parameters like the number of nodes and edges of the corresponding visibility graphs, as well as the (relative) completeness which descibes the shape complexity (*ShapeResultsTable.csv*). In addition, we provide information about the number of detected lobes, necks and tri-cellular junctions, as well as lobe-specific parameters like the protrusion depth and width (*LobeParameters.csv*). The protrusion depth is defined as the shortest distance of the lobe to the line connecting the tri-way junctions adjacent to the lobe. The protrusion width is the distance of a point on the cell membrane, measured at half height of the lobe and perpendicular to the line used for measuring the protrusion depth.
+
+The calculated shape parameters for ROI files do not include information about tri-cellular junctions or the protrusion depth and width. Shape parameters for other organisms include the number of nodes and edges of the resulting visibility graphs and their (relative) completeness.
 
 ## Shape Comparison
 To measure the similarity of different shapes, we implemented an algorithm to calculate the distance between visibility graphs. The user has to provide a single or multiple sets of visibility graphs by clicking "Add graphs" (.gpickle files).
@@ -78,8 +83,28 @@ import matplotlib.pyplot as plt
 
 # import the following files from the results folder of the analyzed image (enable plotting of intermediate steps)
 branchless = skimage.io.imread('branchlessSkeleton.png') > 0
-table = pd.read_csv('ShapeResultsTable.csv', index_col=0)
-visGraphs = pickle.load(open('visibilityGraphs.gpickle', 'rb'))
+table = pd.read_csv('ShapeResultsTable.csv', sep=';')
+
+# function to import pickle files (visibility graphs, cell contours)
+def load_pickle_file(pathToPickleFile):
+   data = {}
+   counter = 1
+   with open(pathToPickleFile, 'rb') as pickleFile:
+      try:
+         while True:
+            obj = pickle.load(pickleFile)
+            try:
+               items = obj.items()
+               data = obj
+            except (AttributeError, TypeError):
+               data[counter] = obj
+               counter += 1
+      except EOFError:
+         pass
+   return(data)
+
+# import visibility graphs using function above
+visGraphs = load_pickle_file('visibilityGraphs.gpickle')
 
 # expand contours of pavement cells
 dilation = skimage.morphology.binary_dilation(branchless, disk(1))
