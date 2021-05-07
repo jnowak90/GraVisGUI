@@ -570,7 +570,7 @@ class Preprocessor:
             rawImage = skimage.io.imread(filename, plugin='tifffile')
         else:
             rawImage = skimage.io.imread(filename)
-        if rawImage.shape[2] > 2:
+        if len(rawImage.shape) > 2 and rawImage.shape[2] > 2:
             rawImage = skimage.color.rgb2gray(rawImage)
         if rawImage.dtype != 'uint8':
             rawImage = skimage.util.img_as_ubyte(skimage.exposure.rescale_intensity(rawImage))
@@ -840,7 +840,7 @@ class VisGraph:
                 except FileNotFoundError:
                     messagebox.showinfo("Warning", "No pre-processed files were found for the selected image.")
 
-            self.shapeResultsTable = pd.DataFrame(columns=['CellNumber', 'VisGraphNodes', 'VisGraphEdges', 'Lobes', 'Necks', 'Junctions', 'JunctionLobes', 'Complexity', 'Circularity', 'Area [px]', 'Perimeter [px]', 'Perimeter [µm]'])
+            self.shapeResultsTable = pd.DataFrame(columns=['CellNumber', 'VisGraphNodes', 'VisGraphEdges', 'Lobes', 'Necks', 'Junctions', 'JunctionLobes', 'Completeness', 'Circularity', 'Area [µm2]', 'Perimeter [µm]'])
             self.lobeParameters = pd.DataFrame(columns=['CellLabel', 'NodeLabelLobe', 'PositionLobeX', 'PositionLobeY', 'NodeLabelNeck1', 'NodeLabelNeck2', 'LobeLength [µm]', 'NeckWidth [µm]', 'ProtrusionDepth [px]', 'ProtrusionWidth [px]'])
 
             self.junctions = self.detect_threeway_junctions(self.skeletonImage, self.branchlessSkeleton, self.labeledImage)
@@ -849,7 +849,7 @@ class VisGraph:
             self.add_data_to_table(self.visibilityGraphs, self.cellContours, self.labeledImage, self.labels, self.junctions, self.resolution)
             show_Message("\nGraVis is done!")
         else:
-            self.shapeResultsTable = pd.DataFrame(columns=['CellNumber', 'VisGraphNodes', 'VisGraphEdges', 'Lobes', 'Necks', 'Complexity', 'Perimeter [px]', 'Perimeter [µm]'])
+            self.shapeResultsTable = pd.DataFrame(columns=['CellNumber', 'VisGraphNodes', 'VisGraphEdges', 'Lobes', 'Necks', 'Completeness', 'Perimeter [µm]'])
             self.lobeParameters = pd.DataFrame(columns=['CellLabel', 'NodeLabelLobe', 'PositionLobeX', 'PositionLobeY', 'NodeLabelNeck1', 'NodeLabelNeck2', 'LobeLength [µm]', 'NeckWidth [µm]'])
 
             if self.roiFileList == False:
@@ -1032,7 +1032,7 @@ class VisGraph:
         for label in range(1, labels):
             cellContour = cellContoursAll[label]
             visGraph = visGraphsAll[label]
-            cell = labeledImage == label
+            cell = labeledImage == label + 1
             if visGraph.number_of_nodes() != 0:
                 cellJunctions = self.find_number_of_cell_junctions(cellContour)
                 lobes, necks = self.count_lobes_and_necks(visGraph)
@@ -1044,14 +1044,15 @@ class VisGraph:
                 self.calculate_lobe_and_neck_properties(label, visGraph, cellContour, cellJunctions, lobes,
                 necks, correlatedJunctions, resolution)
                 sigma = self.compute_graph_complexity(visGraph)
-                area = np.sum(cell)
-                circ = 4 * np.pi * area / len(cellContour) ** 2
-                dataAppend = [label, visGraph.number_of_nodes(), visGraph.number_of_edges(), len(lobes), len(necks), len(cellJunctions), len(correlatedJunctions), sigma, circ, area, len(cellContour), len(cellContour) * resolution]
+                area = np.sum(cell) * (resolution ** 2)
+                perimeter = len(cellContour) * resolution
+                circularity = 4 * np.pi * area / perimeter ** 2
+                dataAppend = [label, visGraph.number_of_nodes(), visGraph.number_of_edges(), len(lobes), len(necks), len(cellJunctions), len(correlatedJunctions), sigma, circularity, area, perimeter]
             else:
                 visGraphsPickle = open(self.outputFolder + '/visibilityGraphs.gpickle', 'ab')
                 pickle.dump(visGraph, visGraphsPickle)
                 visGraphsPickle.close()
-                dataAppend = [label, 0, 0, 0, 0, 0, 0, 0, 0, 0, len(cellContour), len(cellContour) * resolution]
+                dataAppend = [label, 0, 0, 0, 0, 0, 0, 0, 0, 0, perimeter]
             self.shapeResultsTable.loc[0] = dataAppend
             if not os.path.isfile(self.outputFolder + '/ShapeResultsTable.csv'):
                 self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, sep=';', decimal=',')
@@ -1067,9 +1068,9 @@ class VisGraph:
             self.calculate_lobe_and_neck_properties_roi(label, visGraph, cellContour, lobes,
             necks, resolution)
             sigma = self.compute_graph_complexity(visGraph)
-            dataAppend = [label, visGraph.number_of_nodes(), visGraph.number_of_edges(), len(lobes), len(necks), sigma, len(cellContour), len(cellContour) * resolution]
+            dataAppend = [label, visGraph.number_of_nodes(), visGraph.number_of_edges(), len(lobes), len(necks), sigma, len(cellContour) * resolution]
         else:
-            dataAppend = [label, 0, 0, 0, 0, 0, len(cellContour), len(cellContour) * resolution]
+            dataAppend = [label, 0, 0, 0, 0, 0, len(cellContour) * resolution]
         self.shapeResultsTable.loc[0] = dataAppend
         if not os.path.isfile(self.outputFolder + '/ShapeResultsTable.csv'):
             self.shapeResultsTable.to_csv(self.outputFolder + '/ShapeResultsTable.csv', mode='a', index=False, sep=';', decimal=',')
@@ -1561,9 +1562,9 @@ class VisGraphOther:
         self.fileList = fileList
         self.roiInput = roiInput
         if self.roiInput == False:
-            self.shapeResultsTable = pd.DataFrame(columns=['File', 'LabeledImage', 'GraphNumber', '#Nodes', '#Edges', 'Complexity'])
+            self.shapeResultsTable = pd.DataFrame(columns=['File', 'LabeledImage', 'GraphNumber', '#Nodes', '#Edges', 'Completeness'])
         else:
-            self.shapeResultsTable = pd.DataFrame(columns=['File', '#Nodes', '#Edges', 'Complexity'])
+            self.shapeResultsTable = pd.DataFrame(columns=['File', '#Nodes', '#Edges', 'Completeness'])
         if os.path.isfile(self.outputFolder + '/visibilityGraphs.gpickle'):
             os.remove(self.outputFolder + '/visibilityGraphs.gpickle')
         if os.path.isfile(self.outputFolder + '/cellContours.gpickle'):
