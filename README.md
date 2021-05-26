@@ -83,7 +83,7 @@ import matplotlib.pyplot as plt
 
 # import the following files from the results folder of the analyzed image (enable plotting of intermediate steps)
 branchless = skimage.io.imread('branchlessSkeleton.png') > 0
-table = pd.read_csv('ShapeResultsTable.csv', sep=';')
+table = pd.read_csv('ShapeResultsTable.csv', sep=';', decimal=',')
 
 # function to import pickle files (visibility graphs, cell contours)
 def load_pickle_file(pathToPickleFile):
@@ -111,7 +111,7 @@ dilation = skimage.morphology.binary_dilation(branchless, disk(1))
 binaryBranchless = np.ma.masked_where(dilation == 0, dilation)
 
 # extract complexity values from table
-complexity = list(table['Complexity'])
+complexity = list(table['Completeness'])
 
 # create color map for graph complexity
 oranges = matplotlib.cm.get_cmap('Oranges_r', 256)
