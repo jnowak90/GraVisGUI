@@ -595,7 +595,7 @@ class Preprocessor:
         calculate noise of image by calculating the ratio of background pixels and image resize
         """
         noiseGrade = np.sum(backgroundImage) / backgroundImage.size
-        if noiseGrade > 0.5:
+        if noiseGrade > 0.7:
             self.cleanNoise = 1
             show_Message("...The image is very noisy and will be cleaned.")
 
@@ -725,22 +725,29 @@ class Preprocessor:
         """
         show_Message("...Image is skeletonized.")
         if self.cleanNoise == 0:
-            if self.changeRescaling == 0:
-                pLower, pUpper = np.percentile(cleanImage, (2, 98))
-            else:
-                pLower, pUpper = np.percentile(cleanImage, (2, 90))
-            rescaledImage = skimage.exposure.rescale_intensity(cleanImage, (pLower, pUpper))
-            gaussianImage = skimage.filters.gaussian(rescaledImage, sigma=3)
-            tubeImage = tube_filter(gaussianImage, sigma=3)
-            binaryImage = self.binarize_image(tubeImage)
-            smallObjects = skimage.morphology.remove_small_objects(binaryImage, 500)
-            smallHoles = skimage.morphology.remove_small_holes(smallObjects, 200)
-            skeletonImage = skimage.morphology.skeletonize(smallHoles)
-            correctedSkeletonImage = correct_gaps_in_skeleton(skeletonImage)
-            skeletonImage = correctedSkeletonImage
-            branchlessSkeleton = detect_branches(correctedSkeletonImage, mode='remove')
+            branchlessSkeleton, binaryImage, skeletonImage = self.create_skeletonized_image(cleanImage)
         else:
             branchlessSkeleton, binaryImage, skeletonImage = self.remove_noise_from_image(cleanImage)
+        return(branchlessSkeleton, binaryImage, skeletonImage)
+
+    def create_skeletonized_image(self, cleanImage):
+        """
+        create the rescaled, filtered, binarized and skeletonized image
+        """
+        if self.changeRescaling == 0:
+            pLower, pUpper = np.percentile(cleanImage, (2, 98))
+        else:
+            pLower, pUpper = np.percentile(cleanImage, (2, 90))
+        rescaledImage = skimage.exposure.rescale_intensity(cleanImage, (pLower, pUpper))
+        gaussianImage = skimage.filters.gaussian(rescaledImage, sigma=3)
+        tubeImage = tube_filter(gaussianImage, sigma=3)
+        binaryImage = self.binarize_image(tubeImage)
+        smallObjects = skimage.morphology.remove_small_objects(binaryImage, 500)
+        smallHoles = skimage.morphology.remove_small_holes(smallObjects, 200)
+        skeletonImage = skimage.morphology.skeletonize(smallHoles)
+        correctedSkeletonImage = correct_gaps_in_skeleton(skeletonImage)
+        skeletonImage = correctedSkeletonImage
+        branchlessSkeleton = detect_branches(correctedSkeletonImage, mode='remove')
         return(branchlessSkeleton, binaryImage, skeletonImage)
 
     def binarize_image(self, tubeImage):
@@ -766,13 +773,27 @@ class Preprocessor:
         binaryImage = adapthistImage > otsuImage
         smallObjects = skimage.morphology.remove_small_objects(binaryImage, 200)
         intermediateSkeletonImage = skimage.morphology.skeletonize(smallObjects)
-        correctedSkeletonImage = correct_gaps_in_skeleton(intermediateSkeletonImage)
-        intermediateBranchlessSkeleton = detect_branches(correctedSkeletonImage, mode='remove')
-        smallHoles = skimage.morphology.remove_small_holes(intermediateBranchlessSkeleton, 100)
-        skeletonImage = skimage.morphology.skeletonize(smallHoles)
-        skeletonImage = correctedSkeletonImage
-        branchlessSkeleton = detect_branches(skeletonImage, mode='remove')
+        continueNoiseCleaning = self.evaluate_skeleton(intermediateSkeletonImage)
+        if continueNoiseCleaning == True:
+            correctedSkeletonImage = correct_gaps_in_skeleton(intermediateSkeletonImage)
+            intermediateBranchlessSkeleton = detect_branches(correctedSkeletonImage, mode='remove')
+            smallHoles = skimage.morphology.remove_small_holes(intermediateBranchlessSkeleton, 100)
+            skeletonImage = skimage.morphology.skeletonize(smallHoles)
+            skeletonImage = correctedSkeletonImage
+            branchlessSkeleton = detect_branches(skeletonImage, mode='remove')
+        else:
+            branchlessSkeleton, binaryImage, skeletonImage = self.create_skeletonized_image(cleanImage)
         return(branchlessSkeleton, binaryImage, skeletonImage)
+
+    def evaluate_skeleton(self, skeletonImage):
+        """
+        evaluate if denoised image renders usable skeleton
+        """
+        usableSkeleton = True
+        labeledSkeleton, labels = sp.ndimage.label(skeletonImage, np.ones((3,3)))
+        if labels > 5:
+            usableSkeleton = False
+        return(usableSkeleton)
 
     def plot_labeled_image(self, labeledImage, labels):
         """
@@ -1592,7 +1613,7 @@ class VisGraphOther:
                 self.visibilityGraphsOther = {}
                 for fileIndex, file in enumerate(self.fileList):
                     self.labeledImage, self.labels = self.label_binary_image(file)
-                    show_Message("...Create visibility graph" + str(fileIndex + 1) + " of " + str(len(self.fileList)))
+                    show_Message("...Create visibility graph " + str(fileIndex + 1) + " of " + str(len(self.fileList)))
                     self.visibilityGraph = self.visibility_graphs_other(self.labeledImage, self.labels, self.resolution, self.outputFolder)
                     labeledFile = self.plot_labeled_image(self.labeledImage, self.outputFolder, self.labels, 'folder', graphIndex)
                     if len(self.visibilityGraph) == 1:
@@ -1624,15 +1645,17 @@ class VisGraphOther:
         if len(rawImage.shape) == 2:
             if len(np.unique(rawImage)) == 2:
                 binaryImage = rawImage > 0
-                if (1 in binaryImage[0, :]) or (1 in binaryImage[-1, :]) or (1 in binaryImage[:, 0]) or (1 in binaryImage[:, -1]):
-                    show_Message("...Detected objects at image border. Added padding to binary image.")
-                    binaryImage = np.pad(binaryImage, pad_width=3, mode='constant', constant_values=0)
-                labeledImage, labels = sp.ndimage.label(binaryImage, np.ones((3,3)))
-                return(labeledImage, labels)
             else:
-                messagebox.showinfo("Error", "The input image is not binary.")
+                show_Message("Warning, the input image is not binary.")
+                binaryImage = rawImage > np.mean(rawImage)
         else:
-            messagebox.showinfo("Error", "The input image is not binary.")
+            show_Message("Warning, the input image is not binary.")
+            grayImage = skimage.color.rgb2gray(rawImage)
+            binaryImage = grayImage > 0.5
+        if (1 in binaryImage[0, :]) or (1 in binaryImage[-1, :]) or (1 in binaryImage[:, 0]) or (1 in binaryImage[:, -1]):
+            binaryImage = np.pad(binaryImage, pad_width=3, mode='constant', constant_values=0)
+        labeledImage, labels = sp.ndimage.label(binaryImage, np.ones((3,3)))
+        return(labeledImage, labels)
 
     def read_roi_file(self, filename):
         """
@@ -2323,6 +2346,9 @@ def marching_squares(contour, cellImage):
                         contourCopy = np.delete(contourCopy, index[0], 0)
                         'orderedContour'
                 else:
+                    for xPos, yPos in contourCopy:
+                        index = find_index_of_coordinates([xPos, yPos], contour, [0], 'index')
+                        contour = np.delete(contour, index[0], 0)
                     contourCopy = []
         if nextWindow == 'left':
             yRight = yRight - 1
