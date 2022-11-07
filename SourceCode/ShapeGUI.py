@@ -206,7 +206,7 @@ class ShapeGui:
             self.lastDir = './'
         self.directoryName = filedialog.askdirectory()
         self.fileType = "directory"
-        self.fileList = [item for sublist in [glob.glob(self.directoryName + ext) for ext in ["/*.png", "/*.jpg", "/*.jpeg", "/*.tif", "/*.tiff", "/*.TIF", "/*.TIFF", "/*.ROI", "/*.roi"]] for item in sublist]
+        self.fileList = [item for sublist in [glob.glob(self.directoryName + ext) for ext in ["/*.png", "/*.jpg", "/*.jpeg", "/*.tif", "/*.tiff", "/*.roi"]] for item in sublist]
         self.fileName = self.fileList[0]
         self.roiInput = False
         imageTypes = np.unique([element[-3:] for element in self.fileList])
